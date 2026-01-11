@@ -9,6 +9,8 @@ const reconciler = @import("reconciler.zig");
 const config_loader = @import("../config/loader.zig");
 const ipc = @import("ipc.zig");
 const watcher = @import("watcher.zig");
+const snapshots = @import("../history/snapshots.zig");
+const changelog = @import("../history/changelog.zig");
 
 /// Daemon configuration
 pub const DaemonConfig = struct {
@@ -50,6 +52,11 @@ pub const Supervisor = struct {
     should_reload: bool,
     should_stop: bool,
 
+    // History tracking
+    snapshot_mgr: snapshots.SnapshotManager,
+    change_logger: changelog.ChangeLogger,
+    last_snapshot: i64,
+
     // Statistics
     reconcile_count: u64,
     event_count: u64,
@@ -57,6 +64,7 @@ pub const Supervisor = struct {
     start_time: i64,
 
     const Self = @This();
+    const snapshot_interval: i64 = 60; // Minimum seconds between snapshots
 
     pub fn init(allocator: std.mem.Allocator, config: DaemonConfig) Self {
         return Self{
@@ -70,6 +78,9 @@ pub const Supervisor = struct {
             .pid = 0,
             .should_reload = false,
             .should_stop = false,
+            .snapshot_mgr = snapshots.SnapshotManager.init(allocator, null),
+            .change_logger = changelog.ChangeLogger.init(allocator, null),
+            .last_snapshot = 0,
             .reconcile_count = 0,
             .event_count = 0,
             .last_reconcile = 0,
@@ -136,6 +147,9 @@ pub const Supervisor = struct {
         }
 
         self.state = .running;
+
+        // Create initial snapshot
+        try self.createInitialSnapshot();
 
         // Main loop
         try self.runLoop();
@@ -248,11 +262,66 @@ pub const Supervisor = struct {
                 };
 
                 try stdout.print("Reconciled: {d} applied, {d} failed\n", .{ stats.applied, stats.failed });
+
+                // Log changes to history
+                if (stats.applied > 0) {
+                    self.logChanges(&diff);
+                    self.maybeCreateSnapshot();
+                }
             }
         }
 
         self.reconcile_count += 1;
         self.last_reconcile = std.time.timestamp();
+    }
+
+    /// Create initial snapshot at daemon start
+    fn createInitialSnapshot(self: *Self) !void {
+        const stdout = std.io.getStdOut().writer();
+
+        // Query live state
+        var live = state_live.queryLiveState(self.allocator) catch |err| {
+            stdout.print("Warning: Could not create initial snapshot: {}\n", .{err}) catch {};
+            return;
+        };
+        defer live.deinit();
+
+        // Create snapshot
+        const snapshot = self.snapshot_mgr.createSnapshot(&live) catch |err| {
+            stdout.print("Warning: Failed to create initial snapshot: {}\n", .{err}) catch {};
+            return;
+        };
+
+        self.last_snapshot = snapshot.timestamp;
+        stdout.print("Created initial snapshot at {d}\n", .{snapshot.timestamp}) catch {};
+    }
+
+    /// Log changes from a diff to the changelog
+    fn logChanges(self: *Self, diff: *const state_types.StateDiff) void {
+        for (diff.changes.items) |change| {
+            self.change_logger.logStateChange(change) catch {};
+        }
+    }
+
+    /// Create a snapshot if enough time has passed
+    fn maybeCreateSnapshot(self: *Self) void {
+        const now = std.time.timestamp();
+        if (now - self.last_snapshot < snapshot_interval) {
+            return;
+        }
+
+        // Query live state
+        var live = state_live.queryLiveState(self.allocator) catch return;
+        defer live.deinit();
+
+        // Create snapshot
+        const snapshot = self.snapshot_mgr.createSnapshot(&live) catch return;
+        self.last_snapshot = snapshot.timestamp;
+
+        if (self.config.verbose) {
+            const stdout = std.io.getStdOut().writer();
+            stdout.print("Created snapshot at {d}\n", .{snapshot.timestamp}) catch {};
+        }
     }
 
     /// Load configuration from file
