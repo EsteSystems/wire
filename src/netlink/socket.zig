@@ -4,6 +4,49 @@ const linux = std.os.linux;
 /// Netlink protocol families
 pub const NETLINK_ROUTE: u32 = 0;
 
+/// Netlink multicast groups for NETLINK_ROUTE (RTNLGRP_*)
+pub const RTNLGRP = struct {
+    pub const NONE: u32 = 0;
+    pub const LINK: u32 = 1;
+    pub const NOTIFY: u32 = 2;
+    pub const NEIGH: u32 = 3;
+    pub const TC: u32 = 4;
+    pub const IPV4_IFADDR: u32 = 5;
+    pub const IPV4_MROUTE: u32 = 6;
+    pub const IPV4_ROUTE: u32 = 7;
+    pub const IPV4_RULE: u32 = 8;
+    pub const IPV6_IFADDR: u32 = 9;
+    pub const IPV6_MROUTE: u32 = 10;
+    pub const IPV6_ROUTE: u32 = 11;
+    pub const IPV6_IFINFO: u32 = 12;
+    pub const DECnet_IFADDR: u32 = 13;
+    pub const NOP2: u32 = 14;
+    pub const DECnet_ROUTE: u32 = 15;
+    pub const DECnet_RULE: u32 = 16;
+    pub const NOP4: u32 = 17;
+    pub const IPV6_PREFIX: u32 = 18;
+    pub const IPV6_RULE: u32 = 19;
+    pub const ND_USEROPT: u32 = 20;
+    pub const PHONET_IFADDR: u32 = 21;
+    pub const PHONET_ROUTE: u32 = 22;
+    pub const DCB: u32 = 23;
+    pub const IPV4_NETCONF: u32 = 24;
+    pub const IPV6_NETCONF: u32 = 25;
+    pub const MDB: u32 = 26;
+    pub const MPLS_ROUTE: u32 = 27;
+    pub const NSID: u32 = 28;
+    pub const MPLS_NETCONF: u32 = 29;
+    pub const IPV4_MROUTE_R: u32 = 30;
+    pub const IPV6_MROUTE_R: u32 = 31;
+    pub const NEXTHOP: u32 = 32;
+
+    /// Convert group ID to bitmask for bind()
+    pub fn toMask(group: u32) u32 {
+        if (group == 0) return 0;
+        return @as(u32, 1) << @intCast(group - 1);
+    }
+};
+
 /// Netlink message types for NETLINK_ROUTE
 pub const RTM = struct {
     pub const NEWLINK: u16 = 16;

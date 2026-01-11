@@ -6,9 +6,18 @@ const netlink_bond = @import("netlink/bond.zig");
 const netlink_bridge = @import("netlink/bridge.zig");
 const netlink_vlan = @import("netlink/vlan.zig");
 const config_loader = @import("config/loader.zig");
+const state_types = @import("state/types.zig");
+const state_live = @import("state/live.zig");
+const state_desired = @import("state/desired.zig");
+const state_diff = @import("state/diff.zig");
+const state_exporter = @import("state/exporter.zig");
+const netlink_events = @import("netlink/events.zig");
+const reconciler = @import("daemon/reconciler.zig");
+const supervisor = @import("daemon/supervisor.zig");
+const ipc = @import("daemon/ipc.zig");
 const linux = std.os.linux;
 
-const version = "0.2.0";
+const version = "0.3.0";
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -67,6 +76,16 @@ fn executeCommand(allocator: std.mem.Allocator, args: []const []const u8) !void 
         try handleBridge(allocator, args[1..]);
     } else if (std.mem.eql(u8, subject, "vlan")) {
         try handleVlan(allocator, args[1..]);
+    } else if (std.mem.eql(u8, subject, "state")) {
+        try handleState(allocator, args[1..]);
+    } else if (std.mem.eql(u8, subject, "diff")) {
+        try handleDiff(allocator, args[1..]);
+    } else if (std.mem.eql(u8, subject, "events")) {
+        try handleEvents(args[1..]);
+    } else if (std.mem.eql(u8, subject, "reconcile")) {
+        try handleReconcile(allocator, args[1..]);
+    } else if (std.mem.eql(u8, subject, "daemon")) {
+        try handleDaemon(allocator, args[1..]);
     } else {
         const stderr = std.io.getStdErr().writer();
         try stderr.print("Unknown command: {s}\n", .{subject});
@@ -833,6 +852,517 @@ fn handleVlan(allocator: std.mem.Allocator, args: []const []const u8) !void {
     try stdout.print("Invalid VLAN command. Run 'wire vlan' for help.\n", .{});
 }
 
+fn handleState(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    const stdout = std.io.getStdOut().writer();
+
+    // Handle subcommands
+    if (args.len > 0) {
+        const subcmd = args[0];
+        if (std.mem.eql(u8, subcmd, "export")) {
+            try handleStateExport(allocator, args[1..]);
+            return;
+        } else if (std.mem.eql(u8, subcmd, "help") or std.mem.eql(u8, subcmd, "--help")) {
+            try stdout.print("State commands:\n", .{});
+            try stdout.print("  wire state                  Show live network state\n", .{});
+            try stdout.print("  wire state export [file]    Export state to wire config format\n", .{});
+            try stdout.print("\nExport options:\n", .{});
+            try stdout.print("  --interfaces-only           Only export interfaces\n", .{});
+            try stdout.print("  --routes-only               Only export routes\n", .{});
+            try stdout.print("  --all                       Include all state (loopback, kernel routes)\n", .{});
+            try stdout.print("  --no-comments               Omit comments from output\n", .{});
+            return;
+        }
+    }
+
+    try stdout.print("Querying live network state...\n\n", .{});
+
+    var live_state = state_live.queryLiveState(allocator) catch |err| {
+        try stdout.print("Failed to query live state: {}\n", .{err});
+        return;
+    };
+    defer live_state.deinit();
+
+    // Print interfaces
+    try stdout.print("Interfaces ({d}):\n", .{live_state.interfaces.items.len});
+    for (live_state.interfaces.items) |iface| {
+        const state_str = if (iface.isUp()) "UP" else "DOWN";
+        try stdout.print("  {s}: {s}, mtu {d}, type {s}\n", .{
+            iface.getName(),
+            state_str,
+            iface.mtu,
+            @tagName(iface.link_type),
+        });
+    }
+
+    // Print addresses
+    try stdout.print("\nAddresses ({d}):\n", .{live_state.addresses.items.len});
+    for (live_state.addresses.items) |addr| {
+        const family = if (addr.isIPv4()) "IPv4" else "IPv6";
+        if (addr.isIPv4()) {
+            try stdout.print("  {s}: {d}.{d}.{d}.{d}/{d}\n", .{
+                family,
+                addr.address[0],
+                addr.address[1],
+                addr.address[2],
+                addr.address[3],
+                addr.prefix_len,
+            });
+        }
+    }
+
+    // Print routes
+    try stdout.print("\nRoutes ({d}):\n", .{live_state.routes.items.len});
+    for (live_state.routes.items) |route| {
+        if (route.isDefault()) {
+            try stdout.print("  default via {d}.{d}.{d}.{d}\n", .{
+                route.gateway[0],
+                route.gateway[1],
+                route.gateway[2],
+                route.gateway[3],
+            });
+        } else if (route.family == 2) {
+            try stdout.print("  {d}.{d}.{d}.{d}/{d}", .{
+                route.dst[0],
+                route.dst[1],
+                route.dst[2],
+                route.dst[3],
+                route.dst_len,
+            });
+            if (route.has_gateway) {
+                try stdout.print(" via {d}.{d}.{d}.{d}", .{
+                    route.gateway[0],
+                    route.gateway[1],
+                    route.gateway[2],
+                    route.gateway[3],
+                });
+            }
+            try stdout.print("\n", .{});
+        }
+    }
+}
+
+fn handleStateExport(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    const stdout = std.io.getStdOut().writer();
+
+    // Parse options
+    var options = state_exporter.ExportOptions.default;
+    var output_file: ?[]const u8 = null;
+
+    for (args) |arg| {
+        if (std.mem.eql(u8, arg, "--interfaces-only")) {
+            options = state_exporter.ExportOptions.interfaces_only;
+        } else if (std.mem.eql(u8, arg, "--routes-only")) {
+            options = state_exporter.ExportOptions.routes_only;
+        } else if (std.mem.eql(u8, arg, "--all")) {
+            options.skip_loopback = false;
+            options.skip_auto_addresses = false;
+            options.skip_kernel_routes = false;
+        } else if (std.mem.eql(u8, arg, "--no-comments")) {
+            options.comments = false;
+        } else if (!std.mem.startsWith(u8, arg, "-")) {
+            output_file = arg;
+        }
+    }
+
+    // Query live state
+    var live_state = state_live.queryLiveState(allocator) catch |err| {
+        try stdout.print("Failed to query live state: {}\n", .{err});
+        return;
+    };
+    defer live_state.deinit();
+
+    // Export
+    var exporter = state_exporter.StateExporter.init(allocator, options);
+
+    if (output_file) |path| {
+        exporter.exportToFile(&live_state, path) catch |err| {
+            try stdout.print("Failed to write file: {}\n", .{err});
+            return;
+        };
+        try stdout.print("Exported state to: {s}\n", .{path});
+    } else {
+        // Export to stdout
+        const output = exporter.exportToString(&live_state) catch |err| {
+            try stdout.print("Failed to export state: {}\n", .{err});
+            return;
+        };
+        defer allocator.free(output);
+        try stdout.print("{s}", .{output});
+    }
+}
+
+fn handleEvents(args: []const []const u8) !void {
+    const stdout = std.io.getStdOut().writer();
+
+    // Parse duration argument (default 10 seconds)
+    var duration_secs: i32 = 10;
+    if (args.len > 0) {
+        duration_secs = std.fmt.parseInt(i32, args[0], 10) catch 10;
+    }
+
+    try stdout.print("Monitoring network events for {d} seconds...\n", .{duration_secs});
+    try stdout.print("(Make network changes to see events)\n\n", .{});
+
+    // Create event monitor
+    var monitor = netlink_events.EventMonitor.initDefault() catch |err| {
+        try stdout.print("Failed to create event monitor: {}\n", .{err});
+        return;
+    };
+    defer monitor.deinit();
+
+    // Set up callback context
+    const Context = struct {
+        stdout: @TypeOf(stdout),
+        event_count: u32,
+
+        fn callback(event: netlink_events.NetworkEvent, userdata: ?*anyopaque) void {
+            const ctx: *@This() = @ptrCast(@alignCast(userdata.?));
+            ctx.event_count += 1;
+
+            var buf: [256]u8 = undefined;
+            const event_str = netlink_events.formatEvent(&event, &buf) catch "?";
+            ctx.stdout.print("[{d}] {s}\n", .{ ctx.event_count, event_str }) catch {};
+        }
+    };
+
+    var ctx = Context{ .stdout = stdout, .event_count = 0 };
+    monitor.setCallback(Context.callback, @ptrCast(&ctx));
+
+    // Poll for events
+    const start_time = std.time.timestamp();
+    const end_time = start_time + duration_secs;
+
+    while (std.time.timestamp() < end_time) {
+        const result = monitor.poll(1000); // 1 second timeout
+        if (result < 0) {
+            try stdout.print("Error polling events\n", .{});
+            break;
+        }
+    }
+
+    try stdout.print("\nMonitoring complete. {d} events received.\n", .{ctx.event_count});
+}
+
+fn handleDaemon(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    const stdout = std.io.getStdOut().writer();
+    const pid_file = "/run/wire.pid";
+    const socket_path = "/run/wire.sock";
+
+    if (args.len == 0) {
+        try stdout.print("Daemon commands:\n", .{});
+        try stdout.print("  wire daemon start [config]    Start the daemon\n", .{});
+        try stdout.print("  wire daemon stop              Stop the daemon\n", .{});
+        try stdout.print("  wire daemon status            Show daemon status (via IPC)\n", .{});
+        try stdout.print("  wire daemon reload            Reload configuration (via IPC)\n", .{});
+        try stdout.print("  wire daemon diff              Show drift from desired state\n", .{});
+        try stdout.print("  wire daemon state             Show live state from daemon\n", .{});
+        return;
+    }
+
+    const action = args[0];
+
+    if (std.mem.eql(u8, action, "start")) {
+        // Check if already running
+        if (supervisor.isRunning(pid_file)) {
+            try stdout.print("Daemon is already running\n", .{});
+            return;
+        }
+
+        // Parse start command options
+        var config_path: []const u8 = "/etc/wire/network.conf";
+        var verbose = false;
+        var dry_run = false;
+
+        for (args[1..]) |arg| {
+            if (std.mem.eql(u8, arg, "--verbose") or std.mem.eql(u8, arg, "-v")) {
+                verbose = true;
+            } else if (std.mem.eql(u8, arg, "--dry-run") or std.mem.eql(u8, arg, "-n")) {
+                dry_run = true;
+            } else if (!std.mem.startsWith(u8, arg, "-")) {
+                config_path = arg;
+            }
+        }
+
+        try stdout.print("Starting wire daemon with config: {s}\n", .{config_path});
+
+        // Create and start supervisor
+        const config = supervisor.DaemonConfig{
+            .config_path = config_path,
+            .pid_file = pid_file,
+            .socket_path = socket_path,
+            .verbose = verbose,
+            .dry_run = dry_run,
+        };
+
+        var sup = supervisor.Supervisor.init(allocator, config);
+        defer sup.deinit();
+
+        sup.start() catch |err| {
+            try stdout.print("Failed to start daemon: {}\n", .{err});
+            return;
+        };
+
+    } else if (std.mem.eql(u8, action, "stop")) {
+        // Try IPC first, fall back to signal
+        if (ipc.isDaemonRunning(socket_path)) {
+            var client = ipc.IpcClient.init(allocator, socket_path);
+            const response = client.requestStop() catch {
+                // Fall back to signal
+                try stopViaSignal(stdout, pid_file);
+                return;
+            };
+            defer allocator.free(response);
+            try stdout.print("{s}", .{response});
+        } else if (supervisor.isRunning(pid_file)) {
+            try stopViaSignal(stdout, pid_file);
+        } else {
+            try stdout.print("Daemon is not running\n", .{});
+        }
+
+    } else if (std.mem.eql(u8, action, "status")) {
+        // Try IPC first for detailed status
+        if (ipc.isDaemonRunning(socket_path)) {
+            var client = ipc.IpcClient.init(allocator, socket_path);
+            const response = client.getStatus() catch {
+                // Fall back to PID check
+                try statusViaPid(stdout, pid_file);
+                return;
+            };
+            defer allocator.free(response);
+            try stdout.print("Daemon Status (via IPC):\n", .{});
+            try stdout.print("{s}", .{response});
+        } else {
+            try statusViaPid(stdout, pid_file);
+        }
+
+    } else if (std.mem.eql(u8, action, "reload")) {
+        // Try IPC first
+        if (ipc.isDaemonRunning(socket_path)) {
+            var client = ipc.IpcClient.init(allocator, socket_path);
+            const response = client.requestReload() catch {
+                // Fall back to signal
+                try reloadViaSignal(stdout, pid_file);
+                return;
+            };
+            defer allocator.free(response);
+            try stdout.print("{s}", .{response});
+        } else if (supervisor.isRunning(pid_file)) {
+            try reloadViaSignal(stdout, pid_file);
+        } else {
+            try stdout.print("Daemon is not running\n", .{});
+        }
+
+    } else if (std.mem.eql(u8, action, "diff")) {
+        // Get drift from daemon via IPC
+        if (!ipc.isDaemonRunning(socket_path)) {
+            try stdout.print("Daemon is not running. Use 'wire diff <config>' for offline comparison.\n", .{});
+            return;
+        }
+
+        var client = ipc.IpcClient.init(allocator, socket_path);
+        const response = client.getDiff() catch |err| {
+            try stdout.print("Failed to get diff from daemon: {}\n", .{err});
+            return;
+        };
+        defer allocator.free(response);
+        try stdout.print("{s}", .{response});
+
+    } else if (std.mem.eql(u8, action, "state")) {
+        // Get live state from daemon via IPC
+        if (!ipc.isDaemonRunning(socket_path)) {
+            try stdout.print("Daemon is not running. Use 'wire state' for direct query.\n", .{});
+            return;
+        }
+
+        var client = ipc.IpcClient.init(allocator, socket_path);
+        const response = client.getState() catch |err| {
+            try stdout.print("Failed to get state from daemon: {}\n", .{err});
+            return;
+        };
+        defer allocator.free(response);
+        try stdout.print("{s}", .{response});
+
+    } else {
+        try stdout.print("Unknown daemon action: {s}\n", .{action});
+        try stdout.print("Run 'wire daemon' for help.\n", .{});
+    }
+}
+
+fn stopViaSignal(stdout: anytype, pid_file: []const u8) !void {
+    try stdout.print("Stopping wire daemon...\n", .{});
+    supervisor.sendSignal(pid_file, linux.SIG.TERM) catch |err| {
+        try stdout.print("Failed to stop daemon: {}\n", .{err});
+        return;
+    };
+    try stdout.print("Stop signal sent\n", .{});
+}
+
+fn statusViaPid(stdout: anytype, pid_file: []const u8) !void {
+    const pid = supervisor.readPidFile(pid_file) catch {
+        try stdout.print("Daemon is not running\n", .{});
+        return;
+    };
+    try stdout.print("Daemon is running (pid: {d})\n", .{pid});
+}
+
+fn reloadViaSignal(stdout: anytype, pid_file: []const u8) !void {
+    try stdout.print("Reloading wire daemon configuration...\n", .{});
+    supervisor.sendSignal(pid_file, linux.SIG.HUP) catch |err| {
+        try stdout.print("Failed to reload daemon: {}\n", .{err});
+        return;
+    };
+    try stdout.print("Reload signal sent\n", .{});
+}
+
+fn handleReconcile(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    const stdout = std.io.getStdOut().writer();
+
+    if (args.len == 0) {
+        try stdout.print("Usage: wire reconcile <config-file> [--dry-run]\n", .{});
+        try stdout.print("Apply configuration changes to make live state match config.\n", .{});
+        return;
+    }
+
+    const config_path = args[0];
+    var dry_run = false;
+
+    // Check for --dry-run flag
+    for (args[1..]) |arg| {
+        if (std.mem.eql(u8, arg, "--dry-run") or std.mem.eql(u8, arg, "-n")) {
+            dry_run = true;
+        }
+    }
+
+    // Load and parse configuration
+    var loader = config_loader.ConfigLoader.init(allocator);
+    defer loader.deinit();
+
+    var loaded = loader.loadFile(config_path) catch |err| {
+        try stdout.print("Failed to load config: {s}\n", .{@errorName(err)});
+        return;
+    };
+    defer loaded.deinit(allocator);
+
+    try stdout.print("Loaded {d} commands from {s}\n", .{ loaded.commands.len, config_path });
+
+    // Build desired state
+    var desired_state = state_desired.buildDesiredState(loaded.commands, allocator) catch |err| {
+        try stdout.print("Failed to build desired state: {}\n", .{err});
+        return;
+    };
+    defer desired_state.deinit();
+
+    // Query live state
+    var live_state = state_live.queryLiveState(allocator) catch |err| {
+        try stdout.print("Failed to query live state: {}\n", .{err});
+        return;
+    };
+    defer live_state.deinit();
+
+    // Compute diff
+    var diff = state_diff.compare(&desired_state, &live_state, allocator) catch |err| {
+        try stdout.print("Failed to compare states: {}\n", .{err});
+        return;
+    };
+    defer diff.deinit();
+
+    if (diff.isEmpty()) {
+        try stdout.print("\nNo changes needed - state is in sync.\n", .{});
+        return;
+    }
+
+    // Show what we're about to do
+    try stdout.print("\nChanges to apply ({d}):\n", .{diff.changes.items.len});
+    try state_diff.formatDiff(&diff, stdout);
+
+    if (dry_run) {
+        try stdout.print("\nDry run - no changes applied.\n", .{});
+        return;
+    }
+
+    // Apply changes via reconciler
+    try stdout.print("\nApplying changes...\n", .{});
+
+    const policy = reconciler.ReconcilePolicy{
+        .dry_run = dry_run,
+        .verbose = true,
+        .stop_on_error = false,
+    };
+
+    var recon = reconciler.Reconciler.init(allocator, policy);
+    defer recon.deinit();
+
+    const stats = recon.reconcile(&diff) catch |err| {
+        try stdout.print("Reconciliation failed: {}\n", .{err});
+        return;
+    };
+
+    try stdout.print("\nReconciliation complete:\n", .{});
+    try stdout.print("  Applied: {d}\n", .{stats.applied});
+    try stdout.print("  Failed: {d}\n", .{stats.failed});
+
+    // Show failures
+    if (stats.failed > 0) {
+        try stdout.print("\nFailed changes:\n", .{});
+        for (recon.getResults()) |result| {
+            if (!result.success) {
+                if (result.error_message) |msg| {
+                    try stdout.print("  - {s}: {s}\n", .{ @tagName(result.change), msg });
+                }
+            }
+        }
+    }
+}
+
+fn handleDiff(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    const stdout = std.io.getStdOut().writer();
+
+    if (args.len == 0) {
+        try stdout.print("Usage: wire diff <config-file>\n", .{});
+        try stdout.print("Compare desired state from config file against live network state.\n", .{});
+        return;
+    }
+
+    const config_path = args[0];
+
+    // Load and parse configuration
+    var loader = config_loader.ConfigLoader.init(allocator);
+    defer loader.deinit();
+
+    var loaded = loader.loadFile(config_path) catch |err| {
+        try stdout.print("Failed to load config: {s}\n", .{@errorName(err)});
+        return;
+    };
+    defer loaded.deinit(allocator);
+
+    try stdout.print("Loaded {d} commands from {s}\n", .{ loaded.commands.len, config_path });
+
+    // Build desired state
+    var desired_state = state_desired.buildDesiredState(loaded.commands, allocator) catch |err| {
+        try stdout.print("Failed to build desired state: {}\n", .{err});
+        return;
+    };
+    defer desired_state.deinit();
+
+    // Query live state
+    var live_state = state_live.queryLiveState(allocator) catch |err| {
+        try stdout.print("Failed to query live state: {}\n", .{err});
+        return;
+    };
+    defer live_state.deinit();
+
+    // Compare states
+    var diff = state_diff.compare(&desired_state, &live_state, allocator) catch |err| {
+        try stdout.print("Failed to compare states: {}\n", .{err});
+        return;
+    };
+    defer diff.deinit();
+
+    // Format and print diff
+    try stdout.print("\n", .{});
+    try state_diff.formatDiff(&diff, stdout);
+}
+
 fn showVlanDetails(allocator: std.mem.Allocator, name: []const u8, stdout: anytype) !void {
     // Get the interface info
     const maybe_iface = try netlink_interface.getInterfaceByName(allocator, name);
@@ -906,6 +1436,15 @@ fn printUsage() !void {
         \\  apply <config-file>            Apply configuration file
         \\  apply <config-file> --dry-run  Validate without applying
         \\  validate <config-file>         Validate configuration file
+        \\  diff <config-file>             Compare config against live state
+        \\  state                          Show current network state
+        \\  events [seconds]               Monitor network events (default 10s)
+        \\  reconcile <config> [--dry-run] Apply changes to match config
+        \\
+        \\  daemon start [config]          Start the supervision daemon
+        \\  daemon stop                    Stop the daemon
+        \\  daemon status                  Show daemon status
+        \\  daemon reload                  Reload configuration
         \\
         \\  analyze                        Analyze network configuration
         \\
