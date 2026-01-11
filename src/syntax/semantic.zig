@@ -19,6 +19,7 @@ pub const SemanticError = error{
     IncompatibleAction,
     MissingBondName,
     MissingBridgeName,
+    OutOfMemory,
 };
 
 /// Validation result with details

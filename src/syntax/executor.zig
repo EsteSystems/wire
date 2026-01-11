@@ -4,6 +4,9 @@ const semantic = @import("semantic.zig");
 const netlink_interface = @import("../netlink/interface.zig");
 const netlink_address = @import("../netlink/address.zig");
 const netlink_route = @import("../netlink/route.zig");
+const netlink_bond = @import("../netlink/bond.zig");
+const netlink_bridge = @import("../netlink/bridge.zig");
+const netlink_vlan = @import("../netlink/vlan.zig");
 const linux = std.os.linux;
 
 const Command = parser.Command;
@@ -69,9 +72,133 @@ pub const Executor = struct {
             .interface => |iface| try self.executeInterface(iface, cmd.action, cmd.attributes),
             .route => |route| try self.executeRoute(route, cmd.action, cmd.attributes),
             .analyze => try self.executeAnalyze(),
-            .bond => return ExecuteError.NotImplemented,
-            .bridge => return ExecuteError.NotImplemented,
-            .vlan => return ExecuteError.NotImplemented,
+            .bond => |bond| try self.executeBond(bond, cmd.action, cmd.attributes),
+            .bridge => |bridge| try self.executeBridge(bridge, cmd.action, cmd.attributes),
+            .vlan => |vlan| try self.executeVlan(vlan, cmd.action, cmd.attributes),
+        }
+    }
+
+    // Bond commands
+
+    fn executeBond(
+        self: *Self,
+        bond: parser.BondSubject,
+        action: Action,
+        attributes: []const Attribute,
+    ) ExecuteError!void {
+        const name = bond.name orelse return ExecuteError.ValidationFailed;
+
+        switch (action) {
+            .create => {
+                // Get mode from attributes or use default
+                var mode: netlink_bond.BondMode = .balance_rr;
+                for (attributes) |attr| {
+                    if (std.mem.eql(u8, attr.name, "mode")) {
+                        if (attr.value) |mode_str| {
+                            mode = netlink_bond.BondMode.fromString(mode_str) orelse .balance_rr;
+                        }
+                    }
+                }
+                netlink_bond.createBond(name, mode) catch return ExecuteError.NetlinkError;
+                self.stdout.print("Bond {s} created with mode {s}\n", .{ name, mode.toString() }) catch {};
+            },
+            .delete => {
+                netlink_bond.deleteBond(name) catch return ExecuteError.NetlinkError;
+                self.stdout.print("Bond {s} deleted\n", .{name}) catch {};
+            },
+            .add => |add| {
+                if (add.value) |member| {
+                    netlink_bond.addBondMember(name, member) catch return ExecuteError.NetlinkError;
+                    self.stdout.print("Added {s} to bond {s}\n", .{ member, name }) catch {};
+                }
+            },
+            .del => |del| {
+                if (del.value) |member| {
+                    netlink_bond.removeBondMember(member) catch return ExecuteError.NetlinkError;
+                    self.stdout.print("Removed {s} from bond\n", .{member}) catch {};
+                }
+            },
+            else => return ExecuteError.NotImplemented,
+        }
+    }
+
+    // Bridge commands
+
+    fn executeBridge(
+        self: *Self,
+        bridge: parser.BridgeSubject,
+        action: Action,
+        attributes: []const Attribute,
+    ) ExecuteError!void {
+        _ = attributes;
+        const name = bridge.name orelse return ExecuteError.ValidationFailed;
+
+        switch (action) {
+            .create => {
+                netlink_bridge.createBridge(name) catch return ExecuteError.NetlinkError;
+                self.stdout.print("Bridge {s} created\n", .{name}) catch {};
+            },
+            .delete => {
+                netlink_bridge.deleteBridge(name) catch return ExecuteError.NetlinkError;
+                self.stdout.print("Bridge {s} deleted\n", .{name}) catch {};
+            },
+            .add => |add| {
+                if (add.value) |port| {
+                    netlink_bridge.addBridgeMember(name, port) catch return ExecuteError.NetlinkError;
+                    self.stdout.print("Added {s} to bridge {s}\n", .{ port, name }) catch {};
+                }
+            },
+            .del => |del| {
+                if (del.value) |port| {
+                    netlink_bridge.removeBridgeMember(port) catch return ExecuteError.NetlinkError;
+                    self.stdout.print("Removed {s} from bridge\n", .{port}) catch {};
+                }
+            },
+            else => return ExecuteError.NotImplemented,
+        }
+    }
+
+    // VLAN commands
+
+    fn executeVlan(
+        self: *Self,
+        vlan: parser.VlanSubject,
+        action: Action,
+        attributes: []const Attribute,
+    ) ExecuteError!void {
+        switch (action) {
+            .create, .none => {
+                // "vlan 100 on eth0" defaults to create
+                const id = vlan.id orelse return ExecuteError.ValidationFailed;
+                const parent = vlan.parent orelse return ExecuteError.ValidationFailed;
+
+                // Check for custom name in attributes
+                var custom_name: ?[]const u8 = null;
+                for (attributes) |attr| {
+                    if (std.mem.eql(u8, attr.name, "name")) {
+                        custom_name = attr.value;
+                    }
+                }
+
+                if (custom_name) |name| {
+                    netlink_vlan.createVlanWithName(parent, id, name) catch return ExecuteError.NetlinkError;
+                    self.stdout.print("VLAN {s} created (ID {d} on {s})\n", .{ name, id, parent }) catch {};
+                } else {
+                    netlink_vlan.createVlan(parent, id) catch return ExecuteError.NetlinkError;
+                    self.stdout.print("VLAN {s}.{d} created\n", .{ parent, id }) catch {};
+                }
+            },
+            .delete => {
+                if (vlan.parent) |parent| {
+                    if (vlan.id) |id| {
+                        var name_buf: [32]u8 = undefined;
+                        const vlan_name = std.fmt.bufPrint(&name_buf, "{s}.{d}", .{ parent, id }) catch return ExecuteError.ValidationFailed;
+                        netlink_vlan.deleteVlan(vlan_name) catch return ExecuteError.NetlinkError;
+                        self.stdout.print("VLAN {s} deleted\n", .{vlan_name}) catch {};
+                    }
+                }
+            },
+            else => return ExecuteError.NotImplemented,
         }
     }
 

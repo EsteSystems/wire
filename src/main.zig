@@ -2,9 +2,13 @@ const std = @import("std");
 const netlink_interface = @import("netlink/interface.zig");
 const netlink_address = @import("netlink/address.zig");
 const netlink_route = @import("netlink/route.zig");
+const netlink_bond = @import("netlink/bond.zig");
+const netlink_bridge = @import("netlink/bridge.zig");
+const netlink_vlan = @import("netlink/vlan.zig");
+const config_loader = @import("config/loader.zig");
 const linux = std.os.linux;
 
-const version = "0.1.0-dev";
+const version = "0.2.0";
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -53,6 +57,16 @@ fn executeCommand(allocator: std.mem.Allocator, args: []const []const u8) !void 
         try handleRoute(allocator, args[1..]);
     } else if (std.mem.eql(u8, subject, "analyze")) {
         try handleAnalyze(allocator);
+    } else if (std.mem.eql(u8, subject, "apply")) {
+        try handleApply(allocator, args[1..]);
+    } else if (std.mem.eql(u8, subject, "validate")) {
+        try handleValidate(allocator, args[1..]);
+    } else if (std.mem.eql(u8, subject, "bond")) {
+        try handleBond(allocator, args[1..]);
+    } else if (std.mem.eql(u8, subject, "bridge")) {
+        try handleBridge(allocator, args[1..]);
+    } else if (std.mem.eql(u8, subject, "vlan")) {
+        try handleVlan(allocator, args[1..]);
     } else {
         const stderr = std.io.getStdErr().writer();
         try stderr.print("Unknown command: {s}\n", .{subject});
@@ -415,6 +429,447 @@ fn handleAnalyze(allocator: std.mem.Allocator) !void {
     try stdout.print("\n", .{});
 }
 
+fn handleApply(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    const stdout = std.io.getStdOut().writer();
+
+    if (args.len == 0) {
+        try stdout.print("Usage: wire apply <config-file> [--dry-run]\n", .{});
+        return;
+    }
+
+    const config_path = args[0];
+    var dry_run = false;
+
+    // Check for --dry-run flag
+    for (args[1..]) |arg| {
+        if (std.mem.eql(u8, arg, "--dry-run") or std.mem.eql(u8, arg, "-n")) {
+            dry_run = true;
+        }
+    }
+
+    const result = config_loader.applyConfig(config_path, allocator, dry_run) catch |err| {
+        try stdout.print("Failed to apply configuration: {}\n", .{err});
+        return;
+    };
+
+    if (!result.success) {
+        std.process.exit(1);
+    }
+}
+
+fn handleValidate(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    const stdout = std.io.getStdOut().writer();
+
+    if (args.len == 0) {
+        try stdout.print("Usage: wire validate <config-file>\n", .{});
+        return;
+    }
+
+    const config_path = args[0];
+
+    var report = config_loader.validateConfig(config_path, allocator) catch |err| {
+        try stdout.print("Failed to validate configuration: {}\n", .{err});
+        return;
+    };
+    defer report.deinit(allocator);
+
+    try stdout.print("Validation Report\n", .{});
+    try stdout.print("-----------------\n", .{});
+    try stdout.print("Total commands: {d}\n", .{report.total_commands});
+    try stdout.print("Valid: {d}\n", .{report.valid_commands});
+    try stdout.print("Errors: {d}\n", .{report.errors});
+
+    if (report.errors > 0) {
+        try stdout.print("\nErrors:\n", .{});
+        for (report.error_messages) |msg| {
+            try stdout.print("  - {s}\n", .{msg});
+        }
+        std.process.exit(1);
+    } else {
+        try stdout.print("\nConfiguration is valid.\n", .{});
+    }
+}
+
+fn handleBond(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    const stdout = std.io.getStdOut().writer();
+
+    if (args.len == 0) {
+        try stdout.print("Bond commands:\n", .{});
+        try stdout.print("  bond <name> create mode <mode> Create bond\n", .{});
+        try stdout.print("  bond <name> add <member>       Add member to bond\n", .{});
+        try stdout.print("  bond <name> del <member>       Remove member from bond\n", .{});
+        try stdout.print("  bond <name> delete             Delete bond\n", .{});
+        try stdout.print("  bond <name> show               Show bond details\n", .{});
+        try stdout.print("\nModes: balance-rr, active-backup, balance-xor, broadcast, 802.3ad, balance-tlb, balance-alb\n", .{});
+        return;
+    }
+
+    const bond_name = args[0];
+
+    if (args.len == 1) {
+        // wire bond <name> - show bond details
+        try showBondDetails(allocator, bond_name, stdout);
+        return;
+    }
+
+    const action = args[1];
+
+    // wire bond <name> create mode <mode>
+    if (std.mem.eql(u8, action, "create")) {
+        var mode: netlink_bond.BondMode = .balance_rr; // default
+
+        // Look for mode
+        var i: usize = 2;
+        while (i < args.len) : (i += 1) {
+            if (std.mem.eql(u8, args[i], "mode") and i + 1 < args.len) {
+                mode = netlink_bond.BondMode.fromString(args[i + 1]) orelse {
+                    try stdout.print("Invalid bond mode: {s}\n", .{args[i + 1]});
+                    try stdout.print("Valid modes: balance-rr, active-backup, balance-xor, broadcast, 802.3ad, balance-tlb, balance-alb\n", .{});
+                    return;
+                };
+                i += 1;
+            }
+        }
+
+        netlink_bond.createBond(bond_name, mode) catch |err| {
+            try stdout.print("Failed to create bond: {}\n", .{err});
+            return;
+        };
+        try stdout.print("Bond {s} created with mode {s}\n", .{ bond_name, mode.toString() });
+        return;
+    }
+
+    // wire bond <name> delete
+    if (std.mem.eql(u8, action, "delete")) {
+        netlink_bond.deleteBond(bond_name) catch |err| {
+            try stdout.print("Failed to delete bond: {}\n", .{err});
+            return;
+        };
+        try stdout.print("Bond {s} deleted\n", .{bond_name});
+        return;
+    }
+
+    // wire bond <name> add <member>
+    if (std.mem.eql(u8, action, "add") and args.len >= 3) {
+        for (args[2..]) |member| {
+            netlink_bond.addBondMember(bond_name, member) catch |err| {
+                try stdout.print("Failed to add {s} to bond: {}\n", .{ member, err });
+                continue;
+            };
+            try stdout.print("Added {s} to {s}\n", .{ member, bond_name });
+        }
+        return;
+    }
+
+    // wire bond <name> del <member>
+    if (std.mem.eql(u8, action, "del") and args.len >= 3) {
+        for (args[2..]) |member| {
+            netlink_bond.removeBondMember(member) catch |err| {
+                try stdout.print("Failed to remove {s} from bond: {}\n", .{ member, err });
+                continue;
+            };
+            try stdout.print("Removed {s} from bond\n", .{member});
+        }
+        return;
+    }
+
+    // wire bond <name> show
+    if (std.mem.eql(u8, action, "show")) {
+        try showBondDetails(allocator, bond_name, stdout);
+        return;
+    }
+
+    try stdout.print("Unknown bond action: {s}\n", .{action});
+}
+
+fn showBondDetails(allocator: std.mem.Allocator, name: []const u8, stdout: anytype) !void {
+    // Get the interface info
+    const maybe_iface = try netlink_interface.getInterfaceByName(allocator, name);
+    if (maybe_iface == null) {
+        try stdout.print("Bond {s} not found\n", .{name});
+        return;
+    }
+    const iface = maybe_iface.?;
+
+    const state = if (iface.isUp()) "UP" else "DOWN";
+    const carrier = if (iface.hasCarrier()) "CARRIER" else "NO-CARRIER";
+
+    try stdout.print("{d}: {s}: <{s},{s}> mtu {d}\n", .{
+        iface.index,
+        iface.getName(),
+        state,
+        carrier,
+        iface.mtu,
+    });
+
+    if (iface.has_mac) {
+        const mac = iface.formatMac();
+        try stdout.print("    link/ether {s}\n", .{mac});
+    }
+
+    // Get addresses
+    const addrs = try netlink_address.getAddressesForInterface(allocator, @intCast(iface.index));
+    defer allocator.free(addrs);
+
+    for (addrs) |addr| {
+        var addr_buf: [64]u8 = undefined;
+        const addr_str = try addr.formatAddress(&addr_buf);
+        const family = if (addr.isIPv4()) "inet" else "inet6";
+        try stdout.print("    {s} {s} scope {s}\n", .{ family, addr_str, addr.scopeString() });
+    }
+}
+
+fn handleBridge(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    const stdout = std.io.getStdOut().writer();
+
+    if (args.len == 0) {
+        try stdout.print("Bridge commands:\n", .{});
+        try stdout.print("  bridge <name> create           Create bridge\n", .{});
+        try stdout.print("  bridge <name> add <port>       Add port to bridge\n", .{});
+        try stdout.print("  bridge <name> del <port>       Remove port from bridge\n", .{});
+        try stdout.print("  bridge <name> delete           Delete bridge\n", .{});
+        try stdout.print("  bridge <name> show             Show bridge details\n", .{});
+        try stdout.print("  bridge <name> stp on|off       Enable/disable STP\n", .{});
+        return;
+    }
+
+    const bridge_name = args[0];
+
+    if (args.len == 1) {
+        // wire bridge <name> - show bridge details
+        try showBridgeDetails(allocator, bridge_name, stdout);
+        return;
+    }
+
+    const action = args[1];
+
+    // wire bridge <name> create
+    if (std.mem.eql(u8, action, "create")) {
+        netlink_bridge.createBridge(bridge_name) catch |err| {
+            try stdout.print("Failed to create bridge: {}\n", .{err});
+            return;
+        };
+        try stdout.print("Bridge {s} created\n", .{bridge_name});
+        return;
+    }
+
+    // wire bridge <name> delete
+    if (std.mem.eql(u8, action, "delete")) {
+        netlink_bridge.deleteBridge(bridge_name) catch |err| {
+            try stdout.print("Failed to delete bridge: {}\n", .{err});
+            return;
+        };
+        try stdout.print("Bridge {s} deleted\n", .{bridge_name});
+        return;
+    }
+
+    // wire bridge <name> add <port>
+    if (std.mem.eql(u8, action, "add") and args.len >= 3) {
+        for (args[2..]) |port| {
+            netlink_bridge.addBridgeMember(bridge_name, port) catch |err| {
+                try stdout.print("Failed to add {s} to bridge: {}\n", .{ port, err });
+                continue;
+            };
+            try stdout.print("Added {s} to {s}\n", .{ port, bridge_name });
+        }
+        return;
+    }
+
+    // wire bridge <name> del <port>
+    if (std.mem.eql(u8, action, "del") and args.len >= 3) {
+        for (args[2..]) |port| {
+            netlink_bridge.removeBridgeMember(port) catch |err| {
+                try stdout.print("Failed to remove {s} from bridge: {}\n", .{ port, err });
+                continue;
+            };
+            try stdout.print("Removed {s} from bridge\n", .{port});
+        }
+        return;
+    }
+
+    // wire bridge <name> stp on|off
+    if (std.mem.eql(u8, action, "stp") and args.len >= 3) {
+        const state = args[2];
+        var enabled = false;
+
+        if (std.mem.eql(u8, state, "on") or std.mem.eql(u8, state, "1")) {
+            enabled = true;
+        } else if (!std.mem.eql(u8, state, "off") and !std.mem.eql(u8, state, "0")) {
+            try stdout.print("Invalid STP state: {s} (use 'on' or 'off')\n", .{state});
+            return;
+        }
+
+        netlink_bridge.setBridgeStp(bridge_name, enabled) catch |err| {
+            try stdout.print("Failed to set STP state: {}\n", .{err});
+            return;
+        };
+        try stdout.print("Bridge {s} STP {s}\n", .{ bridge_name, if (enabled) "enabled" else "disabled" });
+        return;
+    }
+
+    // wire bridge <name> show
+    if (std.mem.eql(u8, action, "show")) {
+        try showBridgeDetails(allocator, bridge_name, stdout);
+        return;
+    }
+
+    try stdout.print("Unknown bridge action: {s}\n", .{action});
+}
+
+fn showBridgeDetails(allocator: std.mem.Allocator, name: []const u8, stdout: anytype) !void {
+    // Get the interface info
+    const maybe_iface = try netlink_interface.getInterfaceByName(allocator, name);
+    if (maybe_iface == null) {
+        try stdout.print("Bridge {s} not found\n", .{name});
+        return;
+    }
+    const iface = maybe_iface.?;
+
+    const state = if (iface.isUp()) "UP" else "DOWN";
+    const carrier = if (iface.hasCarrier()) "CARRIER" else "NO-CARRIER";
+
+    try stdout.print("{d}: {s}: <{s},{s}> mtu {d}\n", .{
+        iface.index,
+        iface.getName(),
+        state,
+        carrier,
+        iface.mtu,
+    });
+
+    if (iface.has_mac) {
+        const mac = iface.formatMac();
+        try stdout.print("    link/ether {s}\n", .{mac});
+    }
+
+    // Get addresses
+    const addrs = try netlink_address.getAddressesForInterface(allocator, @intCast(iface.index));
+    defer allocator.free(addrs);
+
+    for (addrs) |addr| {
+        var addr_buf: [64]u8 = undefined;
+        const addr_str = try addr.formatAddress(&addr_buf);
+        const family = if (addr.isIPv4()) "inet" else "inet6";
+        try stdout.print("    {s} {s} scope {s}\n", .{ family, addr_str, addr.scopeString() });
+    }
+}
+
+fn handleVlan(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    const stdout = std.io.getStdOut().writer();
+
+    if (args.len == 0) {
+        try stdout.print("VLAN commands:\n", .{});
+        try stdout.print("  vlan <id> on <parent>           Create VLAN (<parent>.<id>)\n", .{});
+        try stdout.print("  vlan <id> on <parent> name <n>  Create VLAN with custom name\n", .{});
+        try stdout.print("  vlan <name> delete              Delete VLAN interface\n", .{});
+        try stdout.print("  vlan <name> show                Show VLAN details\n", .{});
+        try stdout.print("\nExamples:\n", .{});
+        try stdout.print("  wire vlan 100 on eth0           Creates eth0.100\n", .{});
+        try stdout.print("  wire vlan 100 on eth0 name mgmt Creates 'mgmt' VLAN\n", .{});
+        return;
+    }
+
+    // Parse VLAN ID
+    const first_arg = args[0];
+
+    // Check if first arg is a VLAN ID (number)
+    const vlan_id = std.fmt.parseInt(u16, first_arg, 10) catch {
+        // Not a number - treat as interface name for show/delete
+        const iface_name = first_arg;
+
+        if (args.len >= 2 and std.mem.eql(u8, args[1], "delete")) {
+            netlink_vlan.deleteVlan(iface_name) catch |err| {
+                try stdout.print("Failed to delete VLAN: {}\n", .{err});
+                return;
+            };
+            try stdout.print("VLAN {s} deleted\n", .{iface_name});
+            return;
+        }
+
+        if (args.len == 1 or std.mem.eql(u8, args[1], "show")) {
+            try showVlanDetails(allocator, iface_name, stdout);
+            return;
+        }
+
+        try stdout.print("Unknown VLAN action. Run 'wire vlan' for help.\n", .{});
+        return;
+    };
+
+    // Validate VLAN ID
+    if (vlan_id < 1 or vlan_id > 4094) {
+        try stdout.print("Invalid VLAN ID: {d} (must be 1-4094)\n", .{vlan_id});
+        return;
+    }
+
+    // wire vlan <id> on <parent> [name <name>]
+    if (args.len >= 3 and std.mem.eql(u8, args[1], "on")) {
+        const parent_name = args[2];
+        var custom_name: ?[]const u8 = null;
+
+        // Check for optional 'name' parameter
+        var i: usize = 3;
+        while (i < args.len) : (i += 1) {
+            if (std.mem.eql(u8, args[i], "name") and i + 1 < args.len) {
+                custom_name = args[i + 1];
+                i += 1;
+            }
+        }
+
+        if (custom_name) |name| {
+            netlink_vlan.createVlanWithName(parent_name, vlan_id, name) catch |err| {
+                try stdout.print("Failed to create VLAN: {}\n", .{err});
+                return;
+            };
+            try stdout.print("VLAN {s} created (ID {d} on {s})\n", .{ name, vlan_id, parent_name });
+        } else {
+            netlink_vlan.createVlan(parent_name, vlan_id) catch |err| {
+                try stdout.print("Failed to create VLAN: {}\n", .{err});
+                return;
+            };
+            try stdout.print("VLAN {s}.{d} created\n", .{ parent_name, vlan_id });
+        }
+        return;
+    }
+
+    try stdout.print("Invalid VLAN command. Run 'wire vlan' for help.\n", .{});
+}
+
+fn showVlanDetails(allocator: std.mem.Allocator, name: []const u8, stdout: anytype) !void {
+    // Get the interface info
+    const maybe_iface = try netlink_interface.getInterfaceByName(allocator, name);
+    if (maybe_iface == null) {
+        try stdout.print("VLAN {s} not found\n", .{name});
+        return;
+    }
+    const iface = maybe_iface.?;
+
+    const state = if (iface.isUp()) "UP" else "DOWN";
+    const carrier = if (iface.hasCarrier()) "CARRIER" else "NO-CARRIER";
+
+    try stdout.print("{d}: {s}: <{s},{s}> mtu {d}\n", .{
+        iface.index,
+        iface.getName(),
+        state,
+        carrier,
+        iface.mtu,
+    });
+
+    if (iface.has_mac) {
+        const mac = iface.formatMac();
+        try stdout.print("    link/ether {s}\n", .{mac});
+    }
+
+    // Get addresses
+    const addrs = try netlink_address.getAddressesForInterface(allocator, @intCast(iface.index));
+    defer allocator.free(addrs);
+
+    for (addrs) |addr| {
+        var addr_buf: [64]u8 = undefined;
+        const addr_str = try addr.formatAddress(&addr_buf);
+        const family = if (addr.isIPv4()) "inet" else "inet6";
+        try stdout.print("    {s} {s} scope {s}\n", .{ family, addr_str, addr.scopeString() });
+    }
+}
+
 fn printVersion() !void {
     const stdout = std.io.getStdOut().writer();
     try stdout.print("wire {s}\n", .{version});
@@ -443,6 +898,14 @@ fn printUsage() !void {
         \\  route add <dst> dev <iface>    Add route via interface
         \\  route add default via <gw>     Add default route
         \\  route del <dst>                Delete route
+        \\
+        \\  bond                           List bonds (show help)
+        \\  bridge                         List bridges (show help)
+        \\  vlan                           VLAN help
+        \\
+        \\  apply <config-file>            Apply configuration file
+        \\  apply <config-file> --dry-run  Validate without applying
+        \\  validate <config-file>         Validate configuration file
         \\
         \\  analyze                        Analyze network configuration
         \\

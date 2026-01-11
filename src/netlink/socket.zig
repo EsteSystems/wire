@@ -160,11 +160,120 @@ pub const IFLA = struct {
     pub const LINK: u16 = 5;
     pub const QDISC: u16 = 6;
     pub const STATS: u16 = 7;
+    pub const MASTER: u16 = 10;
     pub const TXQLEN: u16 = 13;
     pub const OPERSTATE: u16 = 16;
     pub const LINKMODE: u16 = 17;
     pub const LINKINFO: u16 = 18;
     pub const CARRIER: u16 = 33;
+};
+
+/// Link info attributes (nested in IFLA_LINKINFO)
+pub const IFLA_INFO = struct {
+    pub const UNSPEC: u16 = 0;
+    pub const KIND: u16 = 1;
+    pub const DATA: u16 = 2;
+    pub const XSTATS: u16 = 3;
+    pub const SLAVE_KIND: u16 = 4;
+    pub const SLAVE_DATA: u16 = 5;
+};
+
+/// Bond mode values
+pub const BOND_MODE = struct {
+    pub const ROUNDROBIN: u8 = 0;
+    pub const ACTIVEBACKUP: u8 = 1;
+    pub const XOR: u8 = 2;
+    pub const BROADCAST: u8 = 3;
+    pub const @"802.3AD": u8 = 4;
+    pub const TLB: u8 = 5;
+    pub const ALB: u8 = 6;
+};
+
+/// Bond attributes (nested in IFLA_INFO_DATA for bonds)
+pub const IFLA_BOND = struct {
+    pub const UNSPEC: u16 = 0;
+    pub const MODE: u16 = 1;
+    pub const ACTIVE_SLAVE: u16 = 2;
+    pub const MIIMON: u16 = 3;
+    pub const UPDELAY: u16 = 4;
+    pub const DOWNDELAY: u16 = 5;
+    pub const USE_CARRIER: u16 = 6;
+    pub const ARP_INTERVAL: u16 = 7;
+    pub const ARP_IP_TARGET: u16 = 8;
+    pub const ARP_VALIDATE: u16 = 9;
+    pub const ARP_ALL_TARGETS: u16 = 10;
+    pub const PRIMARY: u16 = 11;
+    pub const PRIMARY_RESELECT: u16 = 12;
+    pub const FAIL_OVER_MAC: u16 = 13;
+    pub const XMIT_HASH_POLICY: u16 = 14;
+    pub const RESEND_IGMP: u16 = 15;
+    pub const NUM_PEER_NOTIF: u16 = 16;
+    pub const ALL_SLAVES_ACTIVE: u16 = 17;
+    pub const MIN_LINKS: u16 = 18;
+    pub const LP_INTERVAL: u16 = 19;
+    pub const PACKETS_PER_SLAVE: u16 = 20;
+    pub const AD_LACP_RATE: u16 = 21;
+    pub const AD_SELECT: u16 = 22;
+    pub const AD_INFO: u16 = 23;
+    pub const AD_ACTOR_SYS_PRIO: u16 = 24;
+    pub const AD_USER_PORT_KEY: u16 = 25;
+    pub const AD_ACTOR_SYSTEM: u16 = 26;
+    pub const TLB_DYNAMIC_LB: u16 = 27;
+    pub const PEER_NOTIF_DELAY: u16 = 28;
+};
+
+/// Bridge attributes (nested in IFLA_INFO_DATA for bridges)
+pub const IFLA_BR = struct {
+    pub const UNSPEC: u16 = 0;
+    pub const FORWARD_DELAY: u16 = 1;
+    pub const HELLO_TIME: u16 = 2;
+    pub const MAX_AGE: u16 = 3;
+    pub const AGEING_TIME: u16 = 4;
+    pub const STP_STATE: u16 = 5;
+    pub const PRIORITY: u16 = 6;
+    pub const VLAN_FILTERING: u16 = 7;
+    pub const VLAN_PROTOCOL: u16 = 8;
+    pub const GROUP_FWD_MASK: u16 = 9;
+    pub const ROOT_ID: u16 = 10;
+    pub const BRIDGE_ID: u16 = 11;
+    pub const ROOT_PORT: u16 = 12;
+    pub const ROOT_PATH_COST: u16 = 13;
+    pub const TOPOLOGY_CHANGE: u16 = 14;
+    pub const TOPOLOGY_CHANGE_DETECTED: u16 = 15;
+    pub const HELLO_TIMER: u16 = 16;
+    pub const TCN_TIMER: u16 = 17;
+    pub const TOPOLOGY_CHANGE_TIMER: u16 = 18;
+    pub const GC_TIMER: u16 = 19;
+    pub const GROUP_ADDR: u16 = 20;
+    pub const FDB_FLUSH: u16 = 21;
+    pub const MCAST_ROUTER: u16 = 22;
+    pub const MCAST_SNOOPING: u16 = 23;
+    pub const MCAST_QUERY_USE_IFADDR: u16 = 24;
+    pub const MCAST_QUERIER: u16 = 25;
+    pub const MCAST_HASH_ELASTICITY: u16 = 26;
+    pub const MCAST_HASH_MAX: u16 = 27;
+    pub const MCAST_LAST_MEMBER_CNT: u16 = 28;
+    pub const MCAST_STARTUP_QUERY_CNT: u16 = 29;
+    pub const MCAST_LAST_MEMBER_INTVL: u16 = 30;
+    pub const MCAST_MEMBERSHIP_INTVL: u16 = 31;
+    pub const MCAST_QUERIER_INTVL: u16 = 32;
+    pub const MCAST_QUERY_INTVL: u16 = 33;
+    pub const MCAST_QUERY_RESPONSE_INTVL: u16 = 34;
+    pub const MCAST_STARTUP_QUERY_INTVL: u16 = 35;
+    pub const NF_CALL_IPTABLES: u16 = 36;
+    pub const NF_CALL_IP6TABLES: u16 = 37;
+    pub const NF_CALL_ARPTABLES: u16 = 38;
+    pub const VLAN_DEFAULT_PVID: u16 = 39;
+};
+
+/// VLAN attributes (nested in IFLA_INFO_DATA for VLANs)
+pub const IFLA_VLAN = struct {
+    pub const UNSPEC: u16 = 0;
+    pub const ID: u16 = 1;
+    pub const FLAGS: u16 = 2;
+    pub const EGRESS_QOS: u16 = 3;
+    pub const INGRESS_QOS: u16 = 4;
+    pub const PROTOCOL: u16 = 5;
 };
 
 /// Interface address attributes (IFA_*)
@@ -425,6 +534,45 @@ pub const MessageBuilder = struct {
         }
 
         self.offset += padded_len;
+    }
+
+    pub fn addAttrU8(self: *Self, attr_type: u16, value: u8) !void {
+        try self.addAttr(attr_type, std.mem.asBytes(&value));
+    }
+
+    pub fn addAttrU16(self: *Self, attr_type: u16, value: u16) !void {
+        try self.addAttr(attr_type, std.mem.asBytes(&value));
+    }
+
+    /// Start a nested attribute. Returns the offset where the nested attr header is.
+    /// Use endNestedAttr to finalize.
+    pub fn startNestedAttr(self: *Self, attr_type: u16) !usize {
+        if (self.offset + @sizeOf(NlAttr) > self.buffer.len) {
+            return error.BufferTooSmall;
+        }
+
+        const start = self.offset;
+        const attr: *NlAttr = @ptrCast(@alignCast(self.buffer[self.offset..].ptr));
+        attr.* = NlAttr{
+            .len = @sizeOf(NlAttr), // Will be updated in endNestedAttr
+            .type = attr_type,
+        };
+
+        self.offset += @sizeOf(NlAttr);
+        return start;
+    }
+
+    /// End a nested attribute. Updates the length of the nested attr.
+    pub fn endNestedAttr(self: *Self, start: usize) void {
+        const attr: *NlAttr = @ptrCast(@alignCast(self.buffer[start..].ptr));
+        attr.len = @intCast(self.offset - start);
+        // Align to 4-byte boundary
+        const padded_len = nlAlign(self.offset - start);
+        const pad_size = padded_len - (self.offset - start);
+        if (pad_size > 0 and self.offset + pad_size <= self.buffer.len) {
+            @memset(self.buffer[self.offset .. self.offset + pad_size], 0);
+            self.offset += pad_size;
+        }
     }
 
     pub fn finalize(self: *Self, hdr: *NlMsgHdr) []u8 {
