@@ -15,9 +15,11 @@ const netlink_events = @import("netlink/events.zig");
 const reconciler = @import("daemon/reconciler.zig");
 const supervisor = @import("daemon/supervisor.zig");
 const ipc = @import("daemon/ipc.zig");
+const connectivity = @import("analysis/connectivity.zig");
+const health = @import("analysis/health.zig");
 const linux = std.os.linux;
 
-const version = "0.3.0";
+const version = "0.4.0";
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -382,32 +384,57 @@ fn handleAnalyze(allocator: std.mem.Allocator) !void {
     try stdout.print("\nNetwork Analysis Report\n", .{});
     try stdout.print("=======================\n\n", .{});
 
-    // Get interfaces
-    const interfaces = try netlink_interface.getInterfaces(allocator);
-    defer allocator.free(interfaces);
+    // Query live state
+    var live_state = state_live.queryLiveState(allocator) catch {
+        try stdout.print("Error: Could not query network state\n", .{});
+        return;
+    };
+    defer live_state.deinit();
 
-    try stdout.print("Interfaces ({d} total)\n", .{interfaces.len});
-    try stdout.print("--------------------\n", .{});
+    // Connectivity Analysis
+    var conn_analyzer = connectivity.ConnectivityAnalyzer.init(allocator);
+    defer conn_analyzer.deinit();
 
-    for (interfaces) |iface| {
-        const status = if (iface.isUp() and iface.hasCarrier())
-            "✓"
+    _ = conn_analyzer.analyze(&live_state) catch {};
+    try conn_analyzer.format(stdout);
+    try stdout.print("\n", .{});
+
+    // Configuration Health
+    var health_analyzer = health.HealthAnalyzer.init(allocator);
+    defer health_analyzer.deinit();
+
+    _ = health_analyzer.analyze(&live_state) catch {};
+    try health_analyzer.format(stdout);
+    try stdout.print("\n", .{});
+
+    // Interface Details
+    try stdout.print("Interface Details\n", .{});
+    try stdout.print("-----------------\n", .{});
+
+    for (live_state.interfaces.items) |*iface| {
+        const status: []const u8 = if (iface.isUp() and iface.hasCarrier())
+            "[ok]"
         else if (iface.isUp())
-            "⚠"
+            "[warn]"
         else
-            "✗";
+            "[down]";
 
-        const addrs = try netlink_address.getAddressesForInterface(allocator, @intCast(iface.index));
-        defer allocator.free(addrs);
+        const addrs = live_state.getAddressesForInterface(iface.index);
 
         var addr_info: [64]u8 = undefined;
         var addr_len: usize = 0;
 
         if (addrs.len > 0) {
-            var tmp_buf: [64]u8 = undefined;
-            const addr_str = try addrs[0].formatAddress(&tmp_buf);
-            @memcpy(addr_info[0..addr_str.len], addr_str);
-            addr_len = addr_str.len;
+            if (addrs[0].family == 2) {
+                const addr_str = std.fmt.bufPrint(&addr_info, "{d}.{d}.{d}.{d}/{d}", .{
+                    addrs[0].address[0],
+                    addrs[0].address[1],
+                    addrs[0].address[2],
+                    addrs[0].address[3],
+                    addrs[0].prefix_len,
+                }) catch continue;
+                addr_len = addr_str.len;
+            }
         }
 
         const state = if (iface.isUp()) "up" else "down";
@@ -415,35 +442,28 @@ fn handleAnalyze(allocator: std.mem.Allocator) !void {
 
         if (addr_len > 0) {
             try stdout.print("{s} {s}: {s}, {s}, {s}\n", .{ status, iface.getName(), state, carrier, addr_info[0..addr_len] });
-        } else if (!iface.isLoopback()) {
+        } else if (iface.link_type != .loopback) {
             try stdout.print("{s} {s}: {s}, {s}, no address\n", .{ status, iface.getName(), state, carrier });
         } else {
             try stdout.print("{s} {s}: {s}, loopback\n", .{ status, iface.getName(), state });
         }
     }
 
-    // Get routes
-    const routes = try netlink_route.getRoutes(allocator);
-    defer allocator.free(routes);
-
-    try stdout.print("\nRouting\n", .{});
+    // Summary
+    try stdout.print("\nSummary\n", .{});
     try stdout.print("-------\n", .{});
 
-    var has_default = false;
-    for (routes) |route| {
-        if (route.route_type != 1) continue; // Only unicast
+    const conn_counts = conn_analyzer.countByStatus();
+    const health_counts = health_analyzer.countByStatus();
+    const overall = health_analyzer.overallStatus();
 
-        if (route.isDefault()) {
-            has_default = true;
-            var gw_buf: [64]u8 = undefined;
-            const gw = try route.formatGateway(&gw_buf);
-            try stdout.print("✓ default via {s}\n", .{gw});
-        }
-    }
-
-    if (!has_default) {
-        try stdout.print("⚠ No default route configured\n", .{});
-    }
+    try stdout.print("Connectivity: {d} ok, {d} warnings, {d} errors\n", .{ conn_counts.ok, conn_counts.warning, conn_counts.err });
+    try stdout.print("Health: {d} healthy, {d} degraded, {d} unhealthy\n", .{ health_counts.healthy, health_counts.degraded, health_counts.unhealthy });
+    try stdout.print("Overall status: {s}\n", .{switch (overall) {
+        .healthy => "HEALTHY",
+        .degraded => "DEGRADED",
+        .unhealthy => "UNHEALTHY",
+    }});
 
     try stdout.print("\n", .{});
 }
@@ -452,21 +472,32 @@ fn handleApply(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const stdout = std.io.getStdOut().writer();
 
     if (args.len == 0) {
-        try stdout.print("Usage: wire apply <config-file> [--dry-run]\n", .{});
+        try stdout.print("Usage: wire apply <config-file> [--dry-run] [--yes]\n", .{});
+        try stdout.print("\nOptions:\n", .{});
+        try stdout.print("  --dry-run, -n    Validate without applying changes\n", .{});
+        try stdout.print("  --yes, -y        Skip confirmation prompt\n", .{});
         return;
     }
 
     const config_path = args[0];
     var dry_run = false;
+    var skip_confirmation = false;
 
-    // Check for --dry-run flag
+    // Check for flags
     for (args[1..]) |arg| {
         if (std.mem.eql(u8, arg, "--dry-run") or std.mem.eql(u8, arg, "-n")) {
             dry_run = true;
+        } else if (std.mem.eql(u8, arg, "--yes") or std.mem.eql(u8, arg, "-y")) {
+            skip_confirmation = true;
         }
     }
 
-    const result = config_loader.applyConfig(config_path, allocator, dry_run) catch |err| {
+    const options = config_loader.ApplyOptions{
+        .dry_run = dry_run,
+        .skip_confirmation = skip_confirmation,
+    };
+
+    const result = config_loader.applyConfig(config_path, allocator, options) catch |err| {
         try stdout.print("Failed to apply configuration: {}\n", .{err});
         return;
     };

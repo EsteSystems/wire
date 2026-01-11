@@ -3,6 +3,10 @@ const parser = @import("../syntax/parser.zig");
 const semantic = @import("../syntax/semantic.zig");
 const executor = @import("../syntax/executor.zig");
 const resolver = @import("resolver.zig");
+const pre_apply = @import("../validation/pre_apply.zig");
+const confirmation = @import("../ui/confirmation.zig");
+const guidance = @import("../validation/guidance.zig");
+const state_live = @import("../state/live.zig");
 
 /// Configuration loading errors
 pub const ConfigError = error{
@@ -180,7 +184,7 @@ pub const ValidationReport = struct {
 };
 
 /// Apply configuration from a file
-pub fn applyConfig(path: []const u8, allocator: std.mem.Allocator, dry_run: bool) !ApplyResult {
+pub fn applyConfig(path: []const u8, allocator: std.mem.Allocator, options: ApplyOptions) !ApplyResult {
     const stdout = std.io.getStdOut().writer();
 
     var loader = ConfigLoader.init(allocator);
@@ -201,9 +205,9 @@ pub fn applyConfig(path: []const u8, allocator: std.mem.Allocator, dry_run: bool
     defer loaded.deinit(allocator);
     try stdout.print("OK ({d} commands)\n", .{loaded.commands.len});
 
-    if (dry_run) {
-        // Validation only
-        try stdout.print("\nValidating configuration...\n", .{});
+    if (options.dry_run) {
+        // Semantic validation
+        try stdout.print("\nValidating syntax...\n", .{});
         var valid_count: usize = 0;
         var error_count: usize = 0;
 
@@ -225,17 +229,156 @@ pub fn applyConfig(path: []const u8, allocator: std.mem.Allocator, dry_run: bool
             }
         }
 
-        try stdout.print("\nValidation Results\n", .{});
+        try stdout.print("Syntax validation: {d} valid, {d} errors\n", .{ valid_count, error_count });
+
+        // Pre-apply validation (check against live state)
+        try stdout.print("\nValidating against live state...\n", .{});
+        var pre_report = pre_apply.validateBeforeApply(loaded.commands, allocator) catch |err| {
+            try stdout.print("Pre-apply validation failed: {s}\n", .{@errorName(err)});
+            return ApplyResult{
+                .success = false,
+                .applied = 0,
+                .failed = error_count + 1,
+                .skipped = valid_count,
+                .message = "Pre-apply validation failed",
+            };
+        };
+        defer pre_report.deinit();
+
+        try pre_report.format(stdout);
+
+        try stdout.print("\nValidation Summary\n", .{});
         try stdout.print("------------------\n", .{});
-        try stdout.print("Total: {d}, Valid: {d}, Errors: {d}\n", .{ loaded.commands.len, valid_count, error_count });
+        try stdout.print("Commands: {d}, Syntax errors: {d}\n", .{ loaded.commands.len, error_count });
+        try stdout.print("Pre-apply: {d} error(s), {d} warning(s)\n", .{ pre_report.errors, pre_report.warnings });
+
+        const total_errors = error_count + pre_report.errors;
+        return ApplyResult{
+            .success = total_errors == 0,
+            .applied = 0,
+            .failed = total_errors,
+            .skipped = valid_count,
+            .message = if (total_errors == 0) "Validation passed" else "Validation failed",
+        };
+    }
+
+    // Pre-apply validation (check against live state)
+    try stdout.print("Validating against live state... ", .{});
+    var pre_report = pre_apply.validateBeforeApply(loaded.commands, allocator) catch |err| {
+        try stdout.print("FAILED ({s})\n", .{@errorName(err)});
+        return ApplyResult{
+            .success = false,
+            .applied = 0,
+            .failed = 1,
+            .skipped = 0,
+            .message = "Pre-apply validation failed",
+        };
+    };
+    defer pre_report.deinit();
+
+    if (pre_report.hasErrors()) {
+        try stdout.print("FAILED\n\n", .{});
+        try pre_report.format(stdout);
+        return ApplyResult{
+            .success = false,
+            .applied = 0,
+            .failed = pre_report.errors,
+            .skipped = 0,
+            .message = "Pre-apply validation found errors",
+        };
+    }
+
+    if (pre_report.hasWarnings()) {
+        try stdout.print("OK ({d} warnings)\n", .{pre_report.warnings});
+        try pre_report.format(stdout);
+    } else {
+        try stdout.print("OK\n", .{});
+    }
+
+    // Generate operator guidance
+    try stdout.print("Analyzing configuration... ", .{});
+    var live_state = state_live.queryLiveState(allocator) catch {
+        try stdout.print("SKIPPED (could not query live state)\n", .{});
+        // Continue without guidance
+        var guidance_engine = guidance.OperatorGuidance.init(allocator);
+        defer guidance_engine.deinit();
+
+        // Resolve dependencies to get correct execution order
+        try stdout.print("Resolving dependencies... ", .{});
+        const ordered_commands = resolver.resolveCommands(loaded.commands, allocator) catch |err| {
+            try stdout.print("FAILED ({s})\n", .{@errorName(err)});
+            return ApplyResult{
+                .success = false,
+                .applied = 0,
+                .failed = 0,
+                .skipped = 0,
+                .message = "Dependency resolution failed",
+            };
+        };
+        defer allocator.free(ordered_commands);
+        try stdout.print("OK\n", .{});
+
+        // Show command preview
+        var confirm_sys = confirmation.ConfirmationSystem.init(allocator, options.skip_confirmation);
+        try confirm_sys.showCommandPreview(loaded.commands);
+
+        // Prompt for confirmation
+        if (!options.skip_confirmation) {
+            const prompt = if (pre_report.hasWarnings())
+                "Apply configuration with warnings?"
+            else
+                "Apply this configuration?";
+
+            const confirmed = confirm_sys.promptConfirmation(prompt) catch false;
+            if (!confirmed) {
+                try stdout.print("\nAborted by user.\n", .{});
+                return ApplyResult{
+                    .success = false,
+                    .applied = 0,
+                    .failed = 0,
+                    .skipped = loaded.commands.len,
+                    .message = "Aborted by user",
+                };
+            }
+        }
+
+        // Apply commands
+        try stdout.print("\nApplying configuration...\n", .{});
+        var exec = executor.Executor.init(allocator);
+        var applied: usize = 0;
+        var failed: usize = 0;
+
+        for (ordered_commands) |cmd| {
+            exec.execute(cmd) catch {
+                failed += 1;
+                continue;
+            };
+            applied += 1;
+        }
+
+        try stdout.print("\nApply Results\n", .{});
+        try stdout.print("-------------\n", .{});
+        try stdout.print("Applied: {d}, Failed: {d}\n", .{ applied, failed });
 
         return ApplyResult{
-            .success = error_count == 0,
-            .applied = 0,
-            .failed = error_count,
-            .skipped = valid_count,
-            .message = if (error_count == 0) "Validation passed" else "Validation failed",
+            .success = failed == 0,
+            .applied = applied,
+            .failed = failed,
+            .skipped = 0,
+            .message = if (failed == 0) "Configuration applied successfully" else "Some commands failed",
         };
+    };
+    defer live_state.deinit();
+
+    var guidance_engine = guidance.OperatorGuidance.init(allocator);
+    defer guidance_engine.deinit();
+
+    const guidance_items = guidance_engine.analyzeConfig(loaded.commands, &live_state) catch &[_]guidance.Guidance{};
+    if (guidance_items.len > 0) {
+        try stdout.print("OK ({d} items)\n", .{guidance_items.len});
+        try guidance_engine.format(stdout);
+    } else {
+        try stdout.print("OK\n", .{});
     }
 
     // Resolve dependencies to get correct execution order
@@ -252,6 +395,30 @@ pub fn applyConfig(path: []const u8, allocator: std.mem.Allocator, dry_run: bool
     };
     defer allocator.free(ordered_commands);
     try stdout.print("OK\n", .{});
+
+    // Show command preview
+    var confirm_sys = confirmation.ConfirmationSystem.init(allocator, options.skip_confirmation);
+    try confirm_sys.showCommandPreview(loaded.commands);
+
+    // Prompt for confirmation
+    if (!options.skip_confirmation) {
+        const prompt = if (pre_report.hasWarnings())
+            "Apply configuration with warnings?"
+        else
+            "Apply this configuration?";
+
+        const confirmed = confirm_sys.promptConfirmation(prompt) catch false;
+        if (!confirmed) {
+            try stdout.print("\nAborted by user.\n", .{});
+            return ApplyResult{
+                .success = false,
+                .applied = 0,
+                .failed = 0,
+                .skipped = loaded.commands.len,
+                .message = "Aborted by user",
+            };
+        }
+    }
 
     // Apply commands in resolved order
     try stdout.print("\nApplying configuration...\n", .{});
@@ -286,6 +453,14 @@ pub const ApplyResult = struct {
     failed: usize,
     skipped: usize,
     message: []const u8,
+};
+
+/// Options for applying configuration
+pub const ApplyOptions = struct {
+    dry_run: bool = false,
+    skip_confirmation: bool = false,
+    force: bool = false,
+    verbose: bool = false,
 };
 
 // Tests
