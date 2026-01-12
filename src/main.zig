@@ -19,9 +19,12 @@ const connectivity = @import("analysis/connectivity.zig");
 const health = @import("analysis/health.zig");
 const snapshots = @import("history/snapshots.zig");
 const changelog = @import("history/changelog.zig");
+const neighbor = @import("netlink/neighbor.zig");
+const stats = @import("netlink/stats.zig");
+const topology = @import("analysis/topology.zig");
 const linux = std.os.linux;
 
-const version = "0.4.0";
+const version = "0.5.0";
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -92,6 +95,10 @@ fn executeCommand(allocator: std.mem.Allocator, args: []const []const u8) !void 
         try handleDaemon(allocator, args[1..]);
     } else if (std.mem.eql(u8, subject, "history")) {
         try handleHistory(allocator, args[1..]);
+    } else if (std.mem.eql(u8, subject, "neighbor")) {
+        try handleNeighbor(allocator, args[1..]);
+    } else if (std.mem.eql(u8, subject, "topology")) {
+        try handleTopology(allocator, args[1..]);
     } else {
         const stderr = std.io.getStdErr().writer();
         try stderr.print("Unknown command: {s}\n", .{subject});
@@ -206,6 +213,12 @@ fn handleInterface(allocator: std.mem.Allocator, args: []const []const u8) !void
         } else {
             try stdout.print("Unknown attribute: {s}\n", .{attr});
         }
+        return;
+    }
+
+    // wire interface <name> stats
+    if (std.mem.eql(u8, action, "stats")) {
+        try handleInterfaceStats(allocator, iface_name);
         return;
     }
 
@@ -1327,17 +1340,17 @@ fn handleReconcile(allocator: std.mem.Allocator, args: []const []const u8) !void
     var recon = reconciler.Reconciler.init(allocator, policy);
     defer recon.deinit();
 
-    const stats = recon.reconcile(&diff) catch |err| {
+    const reconcile_stats = recon.reconcile(&diff) catch |err| {
         try stdout.print("Reconciliation failed: {}\n", .{err});
         return;
     };
 
     try stdout.print("\nReconciliation complete:\n", .{});
-    try stdout.print("  Applied: {d}\n", .{stats.applied});
-    try stdout.print("  Failed: {d}\n", .{stats.failed});
+    try stdout.print("  Applied: {d}\n", .{reconcile_stats.applied});
+    try stdout.print("  Failed: {d}\n", .{reconcile_stats.failed});
 
     // Show failures
-    if (stats.failed > 0) {
+    if (reconcile_stats.failed > 0) {
         try stdout.print("\nFailed changes:\n", .{});
         for (recon.getResults()) |result| {
             if (!result.success) {
@@ -1562,6 +1575,236 @@ fn handleHistory(allocator: std.mem.Allocator, args: []const []const u8) !void {
     }
 }
 
+fn handleNeighbor(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    const stdout = std.io.getStdOut().writer();
+
+    // Default to show
+    var subcommand: []const u8 = "show";
+    if (args.len > 0) {
+        subcommand = args[0];
+    }
+
+    if (std.mem.eql(u8, subcommand, "show") or std.mem.eql(u8, subcommand, "list")) {
+        // wire neighbor show [interface]
+        const neighbors = neighbor.getNeighbors(allocator) catch |err| {
+            try stdout.print("Failed to query neighbor table: {}\n", .{err});
+            return;
+        };
+        defer allocator.free(neighbors);
+
+        // Get interfaces for name lookup
+        const interfaces = netlink_interface.getInterfaces(allocator) catch |err| {
+            try stdout.print("Failed to query interfaces: {}\n", .{err});
+            return;
+        };
+        defer allocator.free(interfaces);
+
+        // Filter by interface name if provided
+        var filter_name: ?[]const u8 = null;
+        if (args.len > 1) {
+            filter_name = args[1];
+        }
+
+        var filter_index: ?i32 = null;
+        if (filter_name) |name| {
+            for (interfaces) |iface| {
+                if (std.mem.eql(u8, iface.getName(), name)) {
+                    filter_index = iface.index;
+                    break;
+                }
+            }
+        }
+
+        if (neighbors.len == 0) {
+            try stdout.print("No neighbor entries found.\n", .{});
+            return;
+        }
+
+        try stdout.print("Neighbor Table\n", .{});
+        try stdout.print("{s:<18} {s:<20} {s:<12} {s:<10}\n", .{ "IP Address", "MAC Address", "State", "Interface" });
+        try stdout.print("{s:-<18} {s:-<20} {s:-<12} {s:-<10}\n", .{ "", "", "", "" });
+
+        var count: usize = 0;
+        for (neighbors) |*entry| {
+            // Filter by interface if specified
+            if (filter_index) |idx| {
+                if (entry.interface_index != idx) continue;
+            }
+
+            var ip_buf: [64]u8 = undefined;
+            const ip_str = entry.formatAddress(&ip_buf) catch "?";
+            const mac_str = entry.formatLladdr();
+
+            // Find interface name
+            var if_name: []const u8 = "?";
+            for (interfaces) |iface| {
+                if (iface.index == entry.interface_index) {
+                    if_name = iface.getName();
+                    break;
+                }
+            }
+
+            try stdout.print("{s:<18} {s:<20} {s:<12} {s:<10}\n", .{
+                ip_str,
+                mac_str,
+                entry.state.toString(),
+                if_name,
+            });
+            count += 1;
+        }
+
+        try stdout.print("\n{d} entries\n", .{count});
+    } else if (std.mem.eql(u8, subcommand, "lookup")) {
+        // wire neighbor lookup <ip>
+        if (args.len < 2) {
+            try stdout.print("Usage: wire neighbor lookup <ip-address>\n", .{});
+            return;
+        }
+
+        const ip = args[1];
+        const entry = neighbor.getNeighborByIP(allocator, ip) catch |err| {
+            try stdout.print("Failed to lookup neighbor: {}\n", .{err});
+            return;
+        };
+
+        if (entry) |*e| {
+            var ip_buf: [64]u8 = undefined;
+            const ip_str = e.formatAddress(&ip_buf) catch "?";
+            const mac_str = e.formatLladdr();
+
+            try stdout.print("{s} -> {s} ({s})\n", .{ ip_str, mac_str, e.state.toString() });
+        } else {
+            try stdout.print("No neighbor entry found for {s}\n", .{ip});
+        }
+    } else if (std.mem.eql(u8, subcommand, "arp")) {
+        // wire neighbor arp - IPv4 only
+        const arp = neighbor.getArpTable(allocator) catch |err| {
+            try stdout.print("Failed to query ARP table: {}\n", .{err});
+            return;
+        };
+        defer allocator.free(arp);
+
+        try stdout.print("ARP Table ({d} entries)\n", .{arp.len});
+        for (arp) |*entry| {
+            var ip_buf: [64]u8 = undefined;
+            const ip_str = entry.formatAddress(&ip_buf) catch "?";
+            const mac_str = entry.formatLladdr();
+            try stdout.print("{s} -> {s} ({s})\n", .{ ip_str, mac_str, entry.state.toString() });
+        }
+    } else {
+        try stdout.print("Unknown neighbor subcommand: {s}\n", .{subcommand});
+        try stdout.print("Available: show, lookup, arp\n", .{});
+    }
+}
+
+fn handleTopology(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    const stdout = std.io.getStdOut().writer();
+
+    // Query live state
+    var live_state = state_live.queryLiveState(allocator) catch |err| {
+        try stdout.print("Failed to query network state: {}\n", .{err});
+        return;
+    };
+    defer live_state.deinit();
+
+    // Build topology graph
+    var graph = topology.TopologyGraph.buildFromState(allocator, &live_state) catch |err| {
+        try stdout.print("Failed to build topology: {}\n", .{err});
+        return;
+    };
+    defer graph.deinit();
+
+    // Default to show
+    var subcommand: []const u8 = "show";
+    if (args.len > 0) {
+        subcommand = args[0];
+    }
+
+    if (std.mem.eql(u8, subcommand, "show")) {
+        // wire topology show
+        try graph.displayTree(stdout);
+    } else if (std.mem.eql(u8, subcommand, "path")) {
+        // wire topology path <src> to <dst>
+        if (args.len < 4 or !std.mem.eql(u8, args[2], "to")) {
+            try stdout.print("Usage: wire topology path <src> to <dst>\n", .{});
+            try stdout.print("Example: wire topology path eth0 to br0\n", .{});
+            return;
+        }
+
+        const src = args[1];
+        const dst = args[3];
+
+        const path = graph.findPath(src, dst, allocator) catch |err| {
+            try stdout.print("Failed to find path: {}\n", .{err});
+            return;
+        };
+
+        if (path) |p| {
+            defer allocator.free(p);
+
+            try stdout.print("Path from {s} to {s}:\n\n", .{ src, dst });
+            try graph.displayPath(p, stdout);
+            try stdout.print("\n", .{});
+
+            // Validate path
+            var validation = graph.validatePath(p);
+            defer validation.deinit();
+            try validation.format(stdout);
+        } else {
+            try stdout.print("No path found between {s} and {s}\n", .{ src, dst });
+        }
+    } else if (std.mem.eql(u8, subcommand, "children")) {
+        // wire topology children <interface>
+        if (args.len < 2) {
+            try stdout.print("Usage: wire topology children <interface>\n", .{});
+            return;
+        }
+
+        const iface_name = args[1];
+        const node = graph.findNodeByName(iface_name);
+
+        if (node) |n| {
+            const children = graph.getChildren(n.index, allocator) catch |err| {
+                try stdout.print("Failed to get children: {}\n", .{err});
+                return;
+            };
+            defer allocator.free(children);
+
+            if (children.len == 0) {
+                try stdout.print("{s} has no child interfaces\n", .{iface_name});
+            } else {
+                try stdout.print("Children of {s}:\n", .{iface_name});
+                for (children) |*child| {
+                    try stdout.print("  ", .{});
+                    try child.format(stdout);
+                    try stdout.print("\n", .{});
+                }
+            }
+        } else {
+            try stdout.print("Interface {s} not found\n", .{iface_name});
+        }
+    } else {
+        try stdout.print("Unknown topology subcommand: {s}\n", .{subcommand});
+        try stdout.print("Available: show, path, children\n", .{});
+    }
+}
+
+fn handleInterfaceStats(allocator: std.mem.Allocator, iface_name: []const u8) !void {
+    const stdout = std.io.getStdOut().writer();
+
+    const iface_stats = stats.getInterfaceStatsByName(allocator, iface_name) catch |err| {
+        try stdout.print("Failed to get statistics: {}\n", .{err});
+        return;
+    };
+
+    if (iface_stats) |*s| {
+        try stdout.print("{s} statistics:\n", .{iface_name});
+        try s.format(stdout);
+    } else {
+        try stdout.print("No statistics found for {s}\n", .{iface_name});
+    }
+}
+
 fn printVersion() !void {
     const stdout = std.io.getStdOut().writer();
     try stdout.print("wire {s}\n", .{version});
@@ -1616,6 +1859,18 @@ fn printUsage() !void {
         \\  history list                   List available snapshots
         \\  history diff <timestamp>       Compare current state to snapshot
         \\  history log                    Show full change history
+        \\
+        \\  neighbor                       Show neighbor (ARP/NDP) table
+        \\  neighbor show [interface]      Show neighbors, optionally for interface
+        \\  neighbor lookup <ip>           Lookup neighbor by IP address
+        \\  neighbor arp                   Show IPv4 ARP table only
+        \\
+        \\  topology                       Show network topology
+        \\  topology show                  Display interface hierarchy
+        \\  topology path <src> to <dst>   Find path between interfaces
+        \\  topology children <interface>  Show child interfaces
+        \\
+        \\  interface <name> stats         Show interface statistics
         \\
         \\Options:
         \\  -h, --help       Show this help message

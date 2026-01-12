@@ -39,7 +39,7 @@ fn queryInterfaces(state: *types.NetworkState) !void {
             .has_mac = iface.has_mac,
             .operstate = iface.operstate,
             .link_type = determineLinkType(iface.flags, iface.getName()),
-            .master_index = null, // TODO: Parse IFLA_MASTER
+            .master_index = iface.master_index,
         };
 
         // Copy name

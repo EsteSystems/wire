@@ -13,6 +13,7 @@ pub const Interface = struct {
     has_mac: bool,
     operstate: u8,
     carrier: bool,
+    master_index: ?i32, // Index of master interface (bond/bridge)
 
     pub fn getName(self: *const Interface) []const u8 {
         return self.name[0..self.name_len];
@@ -102,6 +103,7 @@ pub fn getInterfaces(allocator: std.mem.Allocator) ![]Interface {
                     .has_mac = false,
                     .operstate = 0,
                     .carrier = false,
+                    .master_index = null,
                 };
                 @memset(&iface.name, 0);
                 @memset(&iface.mac, 0);
@@ -140,6 +142,14 @@ pub fn getInterfaces(allocator: std.mem.Allocator) ![]Interface {
                             socket.IFLA.CARRIER => {
                                 if (attr.value.len >= 1) {
                                     iface.carrier = attr.value[0] != 0;
+                                }
+                            },
+                            socket.IFLA.MASTER => {
+                                if (attr.value.len >= 4) {
+                                    const master_idx = std.mem.readInt(i32, attr.value[0..4], .little);
+                                    if (master_idx > 0) {
+                                        iface.master_index = master_idx;
+                                    }
                                 }
                             },
                             else => {},
