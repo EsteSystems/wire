@@ -65,6 +65,22 @@ pub const RTM = struct {
     pub const NEWNEIGH: u16 = 28;
     pub const DELNEIGH: u16 = 29;
     pub const GETNEIGH: u16 = 30;
+
+    pub const NEWRULE: u16 = 32;
+    pub const DELRULE: u16 = 33;
+    pub const GETRULE: u16 = 34;
+
+    pub const NEWQDISC: u16 = 36;
+    pub const DELQDISC: u16 = 37;
+    pub const GETQDISC: u16 = 38;
+
+    pub const NEWTCLASS: u16 = 40;
+    pub const DELTCLASS: u16 = 41;
+    pub const GETTCLASS: u16 = 42;
+
+    pub const NEWTFILTER: u16 = 44;
+    pub const DELTFILTER: u16 = 45;
+    pub const GETTFILTER: u16 = 46;
 };
 
 /// Netlink message header (16 bytes)
@@ -208,6 +224,8 @@ pub const IFLA = struct {
     pub const OPERSTATE: u16 = 16;
     pub const LINKMODE: u16 = 17;
     pub const LINKINFO: u16 = 18;
+    pub const NET_NS_PID: u16 = 19;
+    pub const NET_NS_FD: u16 = 28;
     pub const CARRIER: u16 = 33;
     pub const LINK_NETNSID: u16 = 37; // Network namespace ID of peer (for veth)
 };

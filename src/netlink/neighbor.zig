@@ -358,6 +358,143 @@ fn parseIPv6(ip: []const u8) ?[16]u8 {
     return null;
 }
 
+/// Add a static neighbor entry (ARP/NDP)
+pub fn addNeighbor(if_index: i32, ip: []const u8, mac: [6]u8, permanent: bool) !void {
+    // Parse the IP address
+    var addr: [16]u8 = undefined;
+    var addr_len: usize = 0;
+    var family: u8 = linux.AF.INET;
+
+    if (parseIPv4(ip)) |ipv4| {
+        @memcpy(addr[0..4], &ipv4);
+        addr_len = 4;
+        family = linux.AF.INET;
+    } else if (parseIPv6(ip)) |ipv6| {
+        @memcpy(&addr, &ipv6);
+        addr_len = 16;
+        family = linux.AF.INET6;
+    } else {
+        return error.InvalidAddress;
+    }
+
+    var nl = try socket.NetlinkSocket.open();
+    defer nl.close();
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var buf: [256]u8 = undefined;
+    var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
+
+    const hdr = try builder.addHeader(socket.RTM.NEWNEIGH, socket.NLM_F.REQUEST | socket.NLM_F.ACK | socket.NLM_F.CREATE | socket.NLM_F.REPLACE);
+
+    // Set state: PERMANENT for static entries, REACHABLE for temporary
+    const state: u16 = if (permanent) NUD.PERMANENT else NUD.REACHABLE;
+
+    try builder.addData(NdMsg, NdMsg{
+        .family = family,
+        .ifindex = if_index,
+        .state = state,
+        .flags = 0,
+        .type = 0,
+    });
+
+    // Add destination IP address
+    try builder.addAttr(NDA.DST, addr[0..addr_len]);
+
+    // Add link-layer address (MAC)
+    try builder.addAttr(NDA.LLADDR, &mac);
+
+    const msg = builder.finalize(hdr);
+    const response = try nl.request(msg, allocator);
+    allocator.free(response);
+}
+
+/// Delete a neighbor entry
+pub fn deleteNeighbor(if_index: i32, ip: []const u8) !void {
+    // Parse the IP address
+    var addr: [16]u8 = undefined;
+    var addr_len: usize = 0;
+    var family: u8 = linux.AF.INET;
+
+    if (parseIPv4(ip)) |ipv4| {
+        @memcpy(addr[0..4], &ipv4);
+        addr_len = 4;
+        family = linux.AF.INET;
+    } else if (parseIPv6(ip)) |ipv6| {
+        @memcpy(&addr, &ipv6);
+        addr_len = 16;
+        family = linux.AF.INET6;
+    } else {
+        return error.InvalidAddress;
+    }
+
+    var nl = try socket.NetlinkSocket.open();
+    defer nl.close();
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var buf: [256]u8 = undefined;
+    var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
+
+    const hdr = try builder.addHeader(socket.RTM.DELNEIGH, socket.NLM_F.REQUEST | socket.NLM_F.ACK);
+
+    try builder.addData(NdMsg, NdMsg{
+        .family = family,
+        .ifindex = if_index,
+        .state = 0,
+        .flags = 0,
+        .type = 0,
+    });
+
+    // Add destination IP address
+    try builder.addAttr(NDA.DST, addr[0..addr_len]);
+
+    const msg = builder.finalize(hdr);
+    const response = try nl.request(msg, allocator);
+    allocator.free(response);
+}
+
+/// Parse MAC address string (aa:bb:cc:dd:ee:ff or aa-bb-cc-dd-ee-ff)
+pub fn parseMac(mac_str: []const u8) ?[6]u8 {
+    var result: [6]u8 = undefined;
+    var byte_idx: usize = 0;
+    var current_byte: u8 = 0;
+    var nibble_count: usize = 0;
+
+    for (mac_str) |c| {
+        if (c == ':' or c == '-') {
+            if (nibble_count != 2) return null;
+            if (byte_idx >= 5) return null;
+            result[byte_idx] = current_byte;
+            byte_idx += 1;
+            current_byte = 0;
+            nibble_count = 0;
+        } else {
+            const nibble: u8 = if (c >= '0' and c <= '9')
+                c - '0'
+            else if (c >= 'a' and c <= 'f')
+                c - 'a' + 10
+            else if (c >= 'A' and c <= 'F')
+                c - 'A' + 10
+            else
+                return null;
+
+            if (nibble_count >= 2) return null;
+            current_byte = (current_byte << 4) | nibble;
+            nibble_count += 1;
+        }
+    }
+
+    if (nibble_count != 2 or byte_idx != 5) return null;
+    result[5] = current_byte;
+
+    return result;
+}
+
 /// Display neighbor table
 pub fn displayNeighbors(neighbors: []const NeighborEntry, writer: anytype, interface_resolver: anytype) !void {
     if (neighbors.len == 0) {
@@ -421,6 +558,25 @@ test "parseIPv4 invalid" {
     try std.testing.expect(parseIPv4("256.1.1.1") == null);
     try std.testing.expect(parseIPv4("1.1.1") == null);
     try std.testing.expect(parseIPv4("abc") == null);
+}
+
+test "parseMac" {
+    const result = parseMac("aa:bb:cc:dd:ee:ff");
+    try std.testing.expect(result != null);
+    try std.testing.expectEqual(@as(u8, 0xaa), result.?[0]);
+    try std.testing.expectEqual(@as(u8, 0xbb), result.?[1]);
+    try std.testing.expectEqual(@as(u8, 0xff), result.?[5]);
+}
+
+test "parseMac with dashes" {
+    const result = parseMac("AA-BB-CC-DD-EE-FF");
+    try std.testing.expect(result != null);
+    try std.testing.expectEqual(@as(u8, 0xaa), result.?[0]);
+}
+
+test "parseMac invalid" {
+    try std.testing.expect(parseMac("aa:bb:cc") == null);
+    try std.testing.expect(parseMac("gg:bb:cc:dd:ee:ff") == null);
 }
 
 test "NeighborEntry formatAddress" {
