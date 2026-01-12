@@ -25,6 +25,7 @@ const topology = @import("analysis/topology.zig");
 const native_ping = @import("plugins/native/ping.zig");
 const native_trace = @import("plugins/native/traceroute.zig");
 const native_capture = @import("plugins/native/capture.zig");
+const path_trace = @import("diagnostics/trace.zig");
 const linux = std.os.linux;
 
 const version = "0.5.0";
@@ -104,6 +105,8 @@ fn executeCommand(allocator: std.mem.Allocator, args: []const []const u8) !void 
         try handleTopology(allocator, args[1..]);
     } else if (std.mem.eql(u8, subject, "diagnose")) {
         try handleDiagnose(allocator, args[1..]);
+    } else if (std.mem.eql(u8, subject, "trace")) {
+        try handlePathTrace(allocator, args[1..]);
     } else {
         const stderr = std.io.getStdErr().writer();
         try stderr.print("Unknown command: {s}\n", .{subject});
@@ -2002,6 +2005,45 @@ fn handleDiagnoseCapture(allocator: std.mem.Allocator, args: []const []const u8)
     try capture_stats.format(stdout);
 }
 
+fn handlePathTrace(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    const stdout = std.io.getStdOut().writer();
+
+    if (args.len < 3) {
+        try stdout.print("Usage: wire trace <interface> to <destination>\n", .{});
+        try stdout.print("\nTrace network path from interface to destination IP.\n", .{});
+        try stdout.print("Validates interface states, bonds, bridges, VLANs, and ARP entries.\n", .{});
+        try stdout.print("\nExamples:\n", .{});
+        try stdout.print("  wire trace eth0 to 10.0.0.1\n", .{});
+        try stdout.print("  wire trace br0 to 192.168.1.1\n", .{});
+        try stdout.print("  wire trace bond0.100 to 10.0.0.50\n", .{});
+        return;
+    }
+
+    const source = args[0];
+
+    // Expect "to" keyword
+    if (args.len < 3 or !std.mem.eql(u8, args[1], "to")) {
+        try stdout.print("Usage: wire trace <interface> to <destination>\n", .{});
+        return;
+    }
+
+    const destination = args[2];
+
+    // Run path trace
+    var trace = path_trace.tracePath(allocator, source, destination) catch |err| {
+        if (err == error.PermissionDenied) {
+            try stdout.print("Permission denied: path tracing requires root\n", .{});
+            return;
+        }
+        try stdout.print("Failed to trace path: {}\n", .{err});
+        return;
+    };
+    defer trace.deinit();
+
+    // Display result
+    try trace.format(stdout);
+}
+
 fn handleInterfaceStats(allocator: std.mem.Allocator, iface_name: []const u8) !void {
     const stdout = std.io.getStdOut().writer();
 
@@ -2089,6 +2131,8 @@ fn printUsage() !void {
         \\  diagnose ping <target>         Native ICMP ping
         \\  diagnose trace <target>        Native ICMP traceroute
         \\  diagnose capture [iface]       Native packet capture
+        \\
+        \\  trace <iface> to <dest>        Trace network path to destination
         \\
         \\Options:
         \\  -h, --help       Show this help message
