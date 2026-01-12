@@ -14,9 +14,25 @@ pub const Interface = struct {
     operstate: u8,
     carrier: bool,
     master_index: ?i32, // Index of master interface (bond/bridge)
+    link_index: ?i32, // IFLA_LINK - peer index for veth, parent for vlan
+    link_netns_id: ?i32, // IFLA_LINK_NETNSID - namespace of peer (for veth)
+    link_kind: [16]u8, // IFLA_INFO_KIND - "veth", "bridge", "bond", etc.
+    link_kind_len: usize,
 
     pub fn getName(self: *const Interface) []const u8 {
         return self.name[0..self.name_len];
+    }
+
+    pub fn getLinkKind(self: *const Interface) ?[]const u8 {
+        if (self.link_kind_len == 0) return null;
+        return self.link_kind[0..self.link_kind_len];
+    }
+
+    pub fn isVeth(self: *const Interface) bool {
+        if (self.getLinkKind()) |kind| {
+            return std.mem.eql(u8, kind, "veth");
+        }
+        return false;
     }
 
     pub fn isUp(self: *const Interface) bool {
@@ -104,9 +120,14 @@ pub fn getInterfaces(allocator: std.mem.Allocator) ![]Interface {
                     .operstate = 0,
                     .carrier = false,
                     .master_index = null,
+                    .link_index = null,
+                    .link_netns_id = null,
+                    .link_kind = undefined,
+                    .link_kind_len = 0,
                 };
                 @memset(&iface.name, 0);
                 @memset(&iface.mac, 0);
+                @memset(&iface.link_kind, 0);
 
                 // Parse attributes
                 const attrs_offset = ifinfo_offset + @sizeOf(socket.IfInfoMsg);
@@ -149,6 +170,32 @@ pub fn getInterfaces(allocator: std.mem.Allocator) ![]Interface {
                                     const master_idx = std.mem.readInt(i32, attr.value[0..4], .little);
                                     if (master_idx > 0) {
                                         iface.master_index = master_idx;
+                                    }
+                                }
+                            },
+                            socket.IFLA.LINK => {
+                                if (attr.value.len >= 4) {
+                                    const link_idx = std.mem.readInt(i32, attr.value[0..4], .little);
+                                    if (link_idx > 0) {
+                                        iface.link_index = link_idx;
+                                    }
+                                }
+                            },
+                            socket.IFLA.LINK_NETNSID => {
+                                if (attr.value.len >= 4) {
+                                    iface.link_netns_id = std.mem.readInt(i32, attr.value[0..4], .little);
+                                }
+                            },
+                            socket.IFLA.LINKINFO => {
+                                // Parse nested LINKINFO attributes to get KIND
+                                var nested_parser = socket.AttrParser.init(attr.value);
+                                while (nested_parser.next()) |nested_attr| {
+                                    if (nested_attr.attr_type == socket.IFLA_INFO.KIND) {
+                                        const kind_end = std.mem.indexOfScalar(u8, nested_attr.value, 0) orelse nested_attr.value.len;
+                                        const copy_len = @min(kind_end, iface.link_kind.len);
+                                        @memcpy(iface.link_kind[0..copy_len], nested_attr.value[0..copy_len]);
+                                        iface.link_kind_len = copy_len;
+                                        break;
                                     }
                                 }
                             },

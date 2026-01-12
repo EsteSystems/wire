@@ -54,6 +54,10 @@ pub const TopoNode = struct {
     parent_index: ?i32,
     // VLAN-specific
     vlan_id: ?u16,
+    // Veth-specific: peer interface index (null if not veth or peer in different namespace)
+    veth_peer_index: ?i32,
+    // Veth-specific: peer namespace ID (null if same namespace)
+    veth_peer_netns: ?i32,
 
     const Self = @This();
 
@@ -65,6 +69,13 @@ pub const TopoNode = struct {
         try writer.print("{s} ({s})", .{ self.getName(), self.node_type.toString() });
         if (self.vlan_id) |vid| {
             try writer.print(" id={d}", .{vid});
+        }
+        if (self.veth_peer_index) |peer| {
+            if (self.veth_peer_netns) |ns| {
+                try writer.print(" peer=if{d}@ns{d}", .{ peer, ns });
+            } else {
+                try writer.print(" peer=if{d}", .{peer});
+            }
         }
         if (!self.is_up) {
             try writer.print(" [DOWN]", .{});
@@ -129,6 +140,8 @@ pub const TopologyGraph = struct {
                 .has_carrier = iface.hasCarrier(),
                 .parent_index = iface.master_index,
                 .vlan_id = null,
+                .veth_peer_index = null,
+                .veth_peer_netns = null,
             };
 
             // Check if this is a VLAN
@@ -136,6 +149,17 @@ pub const TopologyGraph = struct {
                 if (vlan.index == iface.index) {
                     node.vlan_id = vlan.vlan_id;
                     node.parent_index = vlan.parent_index;
+                    break;
+                }
+            }
+
+            // Check if this is a veth
+            for (state.veths.items) |veth| {
+                if (veth.index == iface.index) {
+                    if (veth.peer_index > 0) {
+                        node.veth_peer_index = veth.peer_index;
+                    }
+                    node.veth_peer_netns = veth.peer_netns_id;
                     break;
                 }
             }
@@ -154,6 +178,21 @@ pub const TopologyGraph = struct {
                     .to_index = parent_idx,
                     .edge_type = edge_type,
                 });
+            }
+        }
+
+        // Third pass: add veth peer edges
+        for (state.veths.items) |veth| {
+            // Only add edge if peer exists in our namespace (peer_netns_id is null)
+            if (veth.peer_netns_id == null and veth.peer_index > 0) {
+                // Check if peer node exists
+                if (graph.index_map.contains(veth.peer_index)) {
+                    try graph.edges.append(TopoEdge{
+                        .from_index = veth.index,
+                        .to_index = veth.peer_index,
+                        .edge_type = .veth_peer,
+                    });
+                }
             }
         }
 
@@ -179,11 +218,15 @@ pub const TopologyGraph = struct {
     }
 
     /// Get children of a node (interfaces enslaved to it or VLANs on top of it)
+    /// Note: Excludes veth peer relationships to prevent cycles in tree display
     pub fn getChildren(self: *const Self, parent_index: i32, allocator: std.mem.Allocator) ![]const TopoNode {
         var children = std.ArrayList(TopoNode).init(allocator);
         errdefer children.deinit();
 
         for (self.edges.items) |edge| {
+            // Skip veth_peer edges - they're bidirectional and would cause cycles
+            if (edge.edge_type == .veth_peer) continue;
+
             if (edge.to_index == parent_index) {
                 if (self.findNode(edge.from_index)) |node| {
                     try children.append(node.*);
@@ -225,6 +268,19 @@ pub const TopologyGraph = struct {
         }
 
         return roots.toOwnedSlice();
+    }
+
+    /// Get veth peer node (if peer exists in same namespace)
+    pub fn getVethPeer(self: *const Self, index: i32) ?*const TopoNode {
+        if (self.findNode(index)) |node| {
+            if (node.veth_peer_index) |peer_idx| {
+                // Only return peer if it's in the same namespace
+                if (node.veth_peer_netns == null) {
+                    return self.findNode(peer_idx);
+                }
+            }
+        }
+        return null;
     }
 
     /// Find path between two interfaces. Returns null if either endpoint not found.
@@ -458,6 +514,8 @@ test "TopoNode getName" {
         .has_carrier = true,
         .parent_index = null,
         .vlan_id = null,
+        .veth_peer_index = null,
+        .veth_peer_netns = null,
     };
     @memcpy(node.name[0..4], "eth0");
 

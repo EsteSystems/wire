@@ -38,7 +38,7 @@ fn queryInterfaces(state: *types.NetworkState) !void {
             .mac = iface.mac,
             .has_mac = iface.has_mac,
             .operstate = iface.operstate,
-            .link_type = determineLinkType(iface.flags, iface.getName()),
+            .link_type = determineLinkType(&iface),
             .master_index = iface.master_index,
         };
 
@@ -48,14 +48,41 @@ fn queryInterfaces(state: *types.NetworkState) !void {
         iface_state.name_len = name.len;
 
         try state.interfaces.append(iface_state);
+
+        // If this is a veth interface, add to veths list
+        if (iface.isVeth()) {
+            var veth_state = types.VethState{
+                .name = undefined,
+                .name_len = name.len,
+                .index = iface.index,
+                .peer_index = iface.link_index orelse 0,
+                .peer_netns_id = iface.link_netns_id,
+            };
+            @memcpy(veth_state.name[0..name.len], name);
+            try state.veths.append(veth_state);
+        }
     }
 }
 
-fn determineLinkType(flags: u32, name: []const u8) types.InterfaceState.LinkType {
-    // Check for loopback
-    if ((flags & (1 << 3)) != 0) return .loopback; // IFF_LOOPBACK
+fn determineLinkType(iface: *const netlink_interface.Interface) types.InterfaceState.LinkType {
+    // Check for loopback first
+    if ((iface.flags & (1 << 3)) != 0) return .loopback; // IFF_LOOPBACK
 
-    // Heuristic based on name patterns
+    // Use IFLA_INFO_KIND if available (most reliable)
+    if (iface.getLinkKind()) |kind| {
+        if (std.mem.eql(u8, kind, "veth")) return .veth;
+        if (std.mem.eql(u8, kind, "bridge")) return .bridge;
+        if (std.mem.eql(u8, kind, "bond")) return .bond;
+        if (std.mem.eql(u8, kind, "vlan")) return .vlan;
+        if (std.mem.eql(u8, kind, "tun")) return .tun;
+        if (std.mem.eql(u8, kind, "tap")) return .tap;
+        if (std.mem.eql(u8, kind, "vxlan")) return .other;
+        if (std.mem.eql(u8, kind, "macvlan")) return .other;
+        if (std.mem.eql(u8, kind, "ipvlan")) return .other;
+    }
+
+    // Fallback to name-based heuristics for older kernels or physical interfaces
+    const name = iface.getName();
     if (std.mem.startsWith(u8, name, "bond")) return .bond;
     if (std.mem.startsWith(u8, name, "br") or std.mem.startsWith(u8, name, "virbr")) return .bridge;
     if (std.mem.indexOf(u8, name, ".") != null) return .vlan;

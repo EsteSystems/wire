@@ -147,6 +147,19 @@ pub const VlanState = struct {
     }
 };
 
+/// Veth pair state
+pub const VethState = struct {
+    name: [16]u8,
+    name_len: usize,
+    index: i32,
+    peer_index: i32, // Index of the peer veth interface
+    peer_netns_id: ?i32, // Network namespace ID of peer (null if same namespace)
+
+    pub fn getName(self: *const VethState) []const u8 {
+        return self.name[0..self.name_len];
+    }
+};
+
 /// Complete network state snapshot
 pub const NetworkState = struct {
     allocator: std.mem.Allocator,
@@ -156,6 +169,7 @@ pub const NetworkState = struct {
     bonds: std.ArrayList(BondState),
     bridges: std.ArrayList(BridgeState),
     vlans: std.ArrayList(VlanState),
+    veths: std.ArrayList(VethState),
     timestamp: i64,
 
     const Self = @This();
@@ -169,6 +183,7 @@ pub const NetworkState = struct {
             .bonds = std.ArrayList(BondState).init(allocator),
             .bridges = std.ArrayList(BridgeState).init(allocator),
             .vlans = std.ArrayList(VlanState).init(allocator),
+            .veths = std.ArrayList(VethState).init(allocator),
             .timestamp = std.time.timestamp(),
         };
     }
@@ -189,6 +204,7 @@ pub const NetworkState = struct {
         self.bridges.deinit();
 
         self.vlans.deinit();
+        self.veths.deinit();
     }
 
     /// Find interface by name
@@ -225,6 +241,27 @@ pub const NetworkState = struct {
 
         if (count == 0) return &[_]AddressState{};
         return self.addresses.items[start .. start + count];
+    }
+
+    /// Find veth state by interface index
+    pub fn findVeth(self: *const Self, index: i32) ?*const VethState {
+        for (self.veths.items) |*veth| {
+            if (veth.index == index) {
+                return veth;
+            }
+        }
+        return null;
+    }
+
+    /// Get veth peer interface (returns peer interface if exists in same namespace)
+    pub fn getVethPeer(self: *const Self, index: i32) ?*const InterfaceState {
+        if (self.findVeth(index)) |veth| {
+            // Only return peer if it's in the same namespace
+            if (veth.peer_netns_id == null) {
+                return self.findInterfaceByIndex(veth.peer_index);
+            }
+        }
+        return null;
     }
 };
 

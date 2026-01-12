@@ -200,7 +200,7 @@ pub const IFLA = struct {
     pub const BROADCAST: u16 = 2;
     pub const IFNAME: u16 = 3;
     pub const MTU: u16 = 4;
-    pub const LINK: u16 = 5;
+    pub const LINK: u16 = 5; // For veth: peer interface index
     pub const QDISC: u16 = 6;
     pub const STATS: u16 = 7;
     pub const MASTER: u16 = 10;
@@ -209,6 +209,7 @@ pub const IFLA = struct {
     pub const LINKMODE: u16 = 17;
     pub const LINKINFO: u16 = 18;
     pub const CARRIER: u16 = 33;
+    pub const LINK_NETNSID: u16 = 37; // Network namespace ID of peer (for veth)
 };
 
 /// Link info attributes (nested in IFLA_LINKINFO)

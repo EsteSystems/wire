@@ -34,12 +34,16 @@ pub const PathHop = struct {
     state_up: bool,
     master_name: ?[]const u8,
     vlan_id: ?u16,
+    veth_peer_name: ?[]const u8,
+    veth_peer_netns: ?i32, // null = same namespace, value = other namespace
 
     pub const HopType = enum {
         source,
         bridge,
         bond,
         vlan,
+        veth,
+        veth_peer,
         physical,
         gateway,
         destination,
@@ -60,6 +64,8 @@ pub const PathHop = struct {
             .bridge => "bridge",
             .bond => "bond",
             .vlan => "vlan",
+            .veth => "veth",
+            .veth_peer => "veth peer",
             .physical => "physical",
             .gateway => "gateway",
             .destination => "destination",
@@ -78,6 +84,15 @@ pub const PathHop = struct {
         // VLAN ID
         if (self.vlan_id) |vid| {
             try writer.print(" vlan:{d}", .{vid});
+        }
+
+        // Veth peer info
+        if (self.veth_peer_name) |peer| {
+            if (self.veth_peer_netns) |ns| {
+                try writer.print(" -> {s}@netns{d}", .{ peer, ns });
+            } else {
+                try writer.print(" -> {s}", .{peer});
+            }
         }
 
         // Master
@@ -247,9 +262,26 @@ pub const PathTracer = struct {
         // Add source hop
         const src = source.?;
         const src_up = src.isUp();
+
+        // Check if source is a veth
+        var veth_peer_name: ?[]const u8 = null;
+        var veth_peer_netns: ?i32 = null;
+        const is_veth = src.link_type == .veth;
+        if (is_veth) {
+            if (self.state.findVeth(src.index)) |veth| {
+                veth_peer_netns = veth.peer_netns_id;
+                if (veth.peer_netns_id == null) {
+                    // Peer is in same namespace, get its name
+                    if (self.findInterfaceByIndex(veth.peer_index)) |peer| {
+                        veth_peer_name = peer.getName();
+                    }
+                }
+            }
+        }
+
         try trace.hops.append(PathHop{
             .name = source_iface,
-            .hop_type = .source,
+            .hop_type = if (is_veth) .veth else .source,
             .status = if (src_up) .ok else .error_state,
             .details = if (!src_up) "Interface is DOWN" else "",
             .index = src.index,
@@ -257,7 +289,37 @@ pub const PathTracer = struct {
             .state_up = src_up,
             .master_name = null,
             .vlan_id = null,
+            .veth_peer_name = veth_peer_name,
+            .veth_peer_netns = veth_peer_netns,
         });
+
+        // If veth with peer in same namespace, add the peer to the path
+        if (is_veth and veth_peer_name != null) {
+            if (self.state.findVeth(src.index)) |veth| {
+                if (self.findInterfaceByIndex(veth.peer_index)) |peer| {
+                    const peer_up = peer.isUp();
+                    try trace.hops.append(PathHop{
+                        .name = peer.getName(),
+                        .hop_type = .veth_peer,
+                        .status = if (peer_up) .ok else .error_state,
+                        .details = if (!peer_up) "Peer interface is DOWN" else "",
+                        .index = peer.index,
+                        .mac = peer.mac,
+                        .state_up = peer_up,
+                        .master_name = null,
+                        .vlan_id = null,
+                        .veth_peer_name = source_iface,
+                        .veth_peer_netns = null,
+                    });
+
+                    if (!peer_up) {
+                        try trace.addIssue("Veth peer {s} is DOWN", .{peer.getName()});
+                    }
+                }
+            }
+        } else if (is_veth and veth_peer_netns != null) {
+            try trace.addIssue("Veth peer is in different namespace (netns {?d})", .{veth_peer_netns});
+        }
 
         if (!src_up) {
             try trace.addIssue("Source interface {s} is DOWN", .{source_iface});
@@ -282,6 +344,8 @@ pub const PathTracer = struct {
                     .state_up = eg_up,
                     .master_name = null,
                     .vlan_id = null,
+                    .veth_peer_name = null,
+                    .veth_peer_netns = null,
                 });
             }
         }
@@ -310,6 +374,8 @@ pub const PathTracer = struct {
                 .state_up = true,
                 .master_name = null,
                 .vlan_id = null,
+                .veth_peer_name = null,
+                .veth_peer_netns = null,
             });
 
             if (gw_arp == null) {
@@ -329,6 +395,8 @@ pub const PathTracer = struct {
             .state_up = true,
             .master_name = null,
             .vlan_id = null,
+            .veth_peer_name = null,
+            .veth_peer_netns = null,
         });
 
         // Test reachability with ping
@@ -389,6 +457,8 @@ pub const PathTracer = struct {
                 .state_up = m_up,
                 .master_name = null,
                 .vlan_id = null,
+                .veth_peer_name = null,
+                .veth_peer_netns = null,
             });
 
             if (!m_up) {
