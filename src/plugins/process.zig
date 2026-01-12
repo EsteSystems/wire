@@ -48,6 +48,8 @@ pub const ProcessManager = struct {
         args: []const []const u8,
         timeout_ms: u32,
     ) !ProcessResult {
+        _ = timeout_ms; // TODO: implement proper timeout with threads
+
         // Build full argument list (program name + args)
         var argv = std.ArrayList([]const u8).init(self.allocator);
         defer argv.deinit();
@@ -64,98 +66,44 @@ pub const ProcessManager = struct {
 
         try child.spawn();
 
-        // Set up timeout
-        const start_time = std.time.milliTimestamp();
-        const deadline = start_time + timeout_ms;
+        // Read all output BEFORE waiting (important!)
+        var stdout_data: []u8 = &[_]u8{};
+        var stderr_data: []u8 = &[_]u8{};
 
-        // Collect output
-        var stdout_data = std.ArrayList(u8).init(self.allocator);
-        errdefer stdout_data.deinit();
-        var stderr_data = std.ArrayList(u8).init(self.allocator);
-        errdefer stderr_data.deinit();
-
-        var timed_out = false;
-
-        // Poll for output with timeout
-        while (true) {
-            const now = std.time.milliTimestamp();
-            if (now >= deadline) {
-                // Timeout - kill the process
-                timed_out = true;
-                _ = std.posix.kill(child.id, std.posix.SIG.KILL) catch {};
-                break;
-            }
-
-            // Check if process has exited
-            const poll_timeout_ms: i32 = @intCast(@min(100, deadline - now));
-
-            // Read available stdout
-            if (child.stdout) |stdout| {
-                var buf: [4096]u8 = undefined;
-                // Use non-blocking read
-                const bytes_read = stdout.read(&buf) catch |err| switch (err) {
-                    error.WouldBlock => 0,
-                    else => return err,
-                };
-                if (bytes_read > 0 and stdout_data.items.len < MAX_OUTPUT_SIZE) {
-                    const to_append = @min(bytes_read, MAX_OUTPUT_SIZE - stdout_data.items.len);
-                    try stdout_data.appendSlice(buf[0..to_append]);
-                }
-            }
-
-            // Read available stderr
-            if (child.stderr) |stderr| {
-                var buf: [4096]u8 = undefined;
-                const bytes_read = stderr.read(&buf) catch |err| switch (err) {
-                    error.WouldBlock => 0,
-                    else => return err,
-                };
-                if (bytes_read > 0 and stderr_data.items.len < MAX_OUTPUT_SIZE) {
-                    const to_append = @min(bytes_read, MAX_OUTPUT_SIZE - stderr_data.items.len);
-                    try stderr_data.appendSlice(buf[0..to_append]);
-                }
-            }
-
-            // Check if process terminated
-            const wait_result = child.wait() catch |err| switch (err) {
-                error.WouldBlock => {
-                    // Not yet exited, sleep a bit
-                    std.time.sleep(@intCast(poll_timeout_ms * std.time.ns_per_ms));
-                    continue;
-                },
-                else => return err,
-            };
-
-            // Process exited, read remaining output
-            if (child.stdout) |stdout| {
-                const remaining = stdout.readToEndAlloc(self.allocator, MAX_OUTPUT_SIZE) catch &[_]u8{};
-                defer if (remaining.len > 0) self.allocator.free(remaining);
-                try stdout_data.appendSlice(remaining);
-            }
-            if (child.stderr) |stderr| {
-                const remaining = stderr.readToEndAlloc(self.allocator, MAX_OUTPUT_SIZE) catch &[_]u8{};
-                defer if (remaining.len > 0) self.allocator.free(remaining);
-                try stderr_data.appendSlice(remaining);
-            }
-
-            return ProcessResult{
-                .exit_code = @intCast(wait_result.Exited),
-                .stdout = try stdout_data.toOwnedSlice(),
-                .stderr = try stderr_data.toOwnedSlice(),
-                .timed_out = false,
-                .signal = if (wait_result == .Signal) @as(?u32, @intCast(wait_result.Signal)) else null,
-            };
+        if (child.stdout) |stdout_pipe| {
+            stdout_data = stdout_pipe.reader().readAllAlloc(self.allocator, MAX_OUTPUT_SIZE) catch &[_]u8{};
+        }
+        if (child.stderr) |stderr_pipe| {
+            stderr_data = stderr_pipe.reader().readAllAlloc(self.allocator, MAX_OUTPUT_SIZE) catch &[_]u8{};
         }
 
-        // Timed out - wait for killed process
-        _ = child.wait() catch {};
+        // Now wait for process to exit
+        const result = child.wait();
+
+        const term = result catch {
+            return ProcessResult{
+                .exit_code = -1,
+                .stdout = stdout_data,
+                .stderr = stderr_data,
+                .timed_out = false,
+                .signal = null,
+            };
+        };
 
         return ProcessResult{
-            .exit_code = -1,
-            .stdout = try stdout_data.toOwnedSlice(),
-            .stderr = try stderr_data.toOwnedSlice(),
-            .timed_out = true,
-            .signal = null,
+            .exit_code = switch (term) {
+                .Exited => |code| @intCast(code),
+                .Signal => -1,
+                .Stopped => -1,
+                else => -1,
+            },
+            .stdout = stdout_data,
+            .stderr = stderr_data,
+            .timed_out = false,
+            .signal = switch (term) {
+                .Signal => |sig| @intCast(sig),
+                else => null,
+            },
         };
     }
 

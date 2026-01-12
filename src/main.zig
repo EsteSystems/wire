@@ -22,6 +22,9 @@ const changelog = @import("history/changelog.zig");
 const neighbor = @import("netlink/neighbor.zig");
 const stats = @import("netlink/stats.zig");
 const topology = @import("analysis/topology.zig");
+const native_ping = @import("plugins/native/ping.zig");
+const native_trace = @import("plugins/native/traceroute.zig");
+const native_capture = @import("plugins/native/capture.zig");
 const linux = std.os.linux;
 
 const version = "0.5.0";
@@ -99,6 +102,8 @@ fn executeCommand(allocator: std.mem.Allocator, args: []const []const u8) !void 
         try handleNeighbor(allocator, args[1..]);
     } else if (std.mem.eql(u8, subject, "topology")) {
         try handleTopology(allocator, args[1..]);
+    } else if (std.mem.eql(u8, subject, "diagnose")) {
+        try handleDiagnose(allocator, args[1..]);
     } else {
         const stderr = std.io.getStdErr().writer();
         try stderr.print("Unknown command: {s}\n", .{subject});
@@ -1789,6 +1794,214 @@ fn handleTopology(allocator: std.mem.Allocator, args: []const []const u8) !void 
     }
 }
 
+fn handleDiagnose(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    const stdout = std.io.getStdOut().writer();
+
+    if (args.len == 0) {
+        try stdout.print("Diagnose commands (all native, no external tools):\n", .{});
+        try stdout.print("  diagnose ping <target>           ICMP ping\n", .{});
+        try stdout.print("  diagnose trace <target>          ICMP traceroute\n", .{});
+        try stdout.print("  diagnose capture [interface]     Packet capture\n", .{});
+        try stdout.print("\nPing options:\n", .{});
+        try stdout.print("  -c <count>    Number of pings (default: 4)\n", .{});
+        try stdout.print("  -W <secs>     Timeout per packet (default: 1)\n", .{});
+        try stdout.print("  -t <ttl>      Time to live (default: 64)\n", .{});
+        try stdout.print("  from <iface>  Bind to interface\n", .{});
+        try stdout.print("\nTrace options:\n", .{});
+        try stdout.print("  -m <hops>     Max hops (default: 30)\n", .{});
+        try stdout.print("  -q <probes>   Probes per hop (default: 3)\n", .{});
+        try stdout.print("  -W <secs>     Timeout per probe (default: 1)\n", .{});
+        try stdout.print("\nCapture options:\n", .{});
+        try stdout.print("  -c <count>    Stop after N packets\n", .{});
+        try stdout.print("  -t <secs>     Stop after N seconds\n", .{});
+        try stdout.print("  -f <filter>   Filter: tcp, udp, icmp, port N, host X.X.X.X\n", .{});
+        try stdout.print("\nExamples:\n", .{});
+        try stdout.print("  wire diagnose ping 10.0.0.1\n", .{});
+        try stdout.print("  wire diagnose trace 8.8.8.8\n", .{});
+        try stdout.print("  wire diagnose capture eth0 -c 10\n", .{});
+        try stdout.print("  wire diagnose capture eth0 -f \"tcp port 80\"\n", .{});
+        return;
+    }
+
+    const subcommand = args[0];
+
+    if (std.mem.eql(u8, subcommand, "ping")) {
+        try handleDiagnosePing(allocator, args[1..]);
+    } else if (std.mem.eql(u8, subcommand, "trace") or std.mem.eql(u8, subcommand, "traceroute")) {
+        try handleDiagnoseTrace(allocator, args[1..]);
+    } else if (std.mem.eql(u8, subcommand, "capture") or std.mem.eql(u8, subcommand, "cap")) {
+        try handleDiagnoseCapture(allocator, args[1..]);
+    } else {
+        try stdout.print("Unknown diagnose subcommand: {s}\n", .{subcommand});
+        try stdout.print("Available: ping, trace, capture\n", .{});
+    }
+}
+
+fn handleDiagnosePing(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    const stdout = std.io.getStdOut().writer();
+
+    if (args.len == 0) {
+        try stdout.print("Usage: wire diagnose ping <target> [options]\n", .{});
+        return;
+    }
+
+    const target = args[0];
+    var options = native_ping.PingOptions{};
+
+    // Parse options
+    var i: usize = 1;
+    while (i < args.len) : (i += 1) {
+        if (std.mem.eql(u8, args[i], "from") and i + 1 < args.len) {
+            options.interface = args[i + 1];
+            i += 1;
+        } else if (std.mem.eql(u8, args[i], "-c") and i + 1 < args.len) {
+            options.count = std.fmt.parseInt(u32, args[i + 1], 10) catch 4;
+            i += 1;
+        } else if (std.mem.eql(u8, args[i], "-W") and i + 1 < args.len) {
+            options.timeout_ms = (std.fmt.parseInt(u32, args[i + 1], 10) catch 1) * 1000;
+            i += 1;
+        } else if (std.mem.eql(u8, args[i], "-t") and i + 1 < args.len) {
+            options.ttl = std.fmt.parseInt(u8, args[i + 1], 10) catch 64;
+            i += 1;
+        } else if (std.mem.eql(u8, args[i], "-s") and i + 1 < args.len) {
+            options.packet_size = std.fmt.parseInt(u16, args[i + 1], 10) catch 56;
+            i += 1;
+        } else if (std.mem.eql(u8, args[i], "-i") and i + 1 < args.len) {
+            options.interval_ms = (std.fmt.parseInt(u32, args[i + 1], 10) catch 1) * 1000;
+            i += 1;
+        }
+    }
+
+    // Run native ping
+    const result = native_ping.ping(allocator, target, options) catch |err| {
+        if (err == error.PermissionDenied) {
+            try stdout.print("Permission denied: raw socket requires root or CAP_NET_RAW\n", .{});
+            return;
+        }
+        try stdout.print("Failed to run ping: {}\n", .{err});
+        return;
+    };
+
+    // Display result
+    try result.format(stdout);
+}
+
+fn handleDiagnoseTrace(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    const stdout = std.io.getStdOut().writer();
+
+    if (args.len == 0) {
+        try stdout.print("Usage: wire diagnose trace <target> [options]\n", .{});
+        return;
+    }
+
+    const target = args[0];
+    var options = native_trace.TraceOptions{};
+
+    // Parse options
+    var i: usize = 1;
+    while (i < args.len) : (i += 1) {
+        if (std.mem.eql(u8, args[i], "from") and i + 1 < args.len) {
+            options.interface = args[i + 1];
+            i += 1;
+        } else if (std.mem.eql(u8, args[i], "-m") and i + 1 < args.len) {
+            options.max_hops = std.fmt.parseInt(u8, args[i + 1], 10) catch 30;
+            i += 1;
+        } else if (std.mem.eql(u8, args[i], "-q") and i + 1 < args.len) {
+            options.probes_per_hop = std.fmt.parseInt(u8, args[i + 1], 10) catch 3;
+            i += 1;
+        } else if (std.mem.eql(u8, args[i], "-W") and i + 1 < args.len) {
+            options.timeout_ms = (std.fmt.parseInt(u32, args[i + 1], 10) catch 1) * 1000;
+            i += 1;
+        } else if (std.mem.eql(u8, args[i], "-f") and i + 1 < args.len) {
+            options.initial_ttl = std.fmt.parseInt(u8, args[i + 1], 10) catch 1;
+            i += 1;
+        }
+    }
+
+    // Run native traceroute
+    var result = native_trace.trace(allocator, target, options) catch |err| {
+        if (err == error.PermissionDenied) {
+            try stdout.print("Permission denied: raw socket requires root or CAP_NET_RAW\n", .{});
+            return;
+        }
+        try stdout.print("Failed to run traceroute: {}\n", .{err});
+        return;
+    };
+    defer result.deinit();
+
+    // Display result
+    try result.format(stdout);
+}
+
+fn handleDiagnoseCapture(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    const stdout = std.io.getStdOut().writer();
+
+    var options = native_capture.CaptureOptions{};
+    var filter_str: ?[]const u8 = null;
+
+    // Parse arguments
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        const arg = args[i];
+        if (std.mem.eql(u8, arg, "-c") and i + 1 < args.len) {
+            options.count = std.fmt.parseInt(u32, args[i + 1], 10) catch null;
+            i += 1;
+        } else if (std.mem.eql(u8, arg, "-t") and i + 1 < args.len) {
+            options.duration_secs = std.fmt.parseInt(u32, args[i + 1], 10) catch null;
+            i += 1;
+        } else if (std.mem.eql(u8, arg, "-f") and i + 1 < args.len) {
+            filter_str = args[i + 1];
+            i += 1;
+        } else if (!std.mem.startsWith(u8, arg, "-")) {
+            options.interface = arg;
+        }
+    }
+
+    // Apply filter
+    if (filter_str) |f| {
+        const filter_opts = native_capture.parseFilter(f);
+        options.filter_proto = filter_opts.filter_proto;
+        options.filter_port = filter_opts.filter_port;
+        options.filter_host = filter_opts.filter_host;
+    }
+
+    // Default to 10 packets if no limit specified
+    if (options.count == null and options.duration_secs == null) {
+        options.count = 10;
+    }
+
+    // Print header
+    if (options.interface) |iface| {
+        try stdout.print("Capturing on {s}", .{iface});
+    } else {
+        try stdout.print("Capturing on all interfaces", .{});
+    }
+    if (options.count) |c| {
+        try stdout.print(", max {d} packets", .{c});
+    }
+    if (options.duration_secs) |d| {
+        try stdout.print(", max {d} seconds", .{d});
+    }
+    try stdout.print("\n\n", .{});
+
+    // Run capture
+    const capture_stats = native_capture.capture(allocator, options, stdout) catch |err| {
+        if (err == error.PermissionDenied) {
+            try stdout.print("Permission denied: packet capture requires root or CAP_NET_RAW\n", .{});
+            return;
+        }
+        if (err == error.InterfaceNotFound) {
+            try stdout.print("Interface not found\n", .{});
+            return;
+        }
+        try stdout.print("Failed to capture: {}\n", .{err});
+        return;
+    };
+
+    // Print stats
+    try capture_stats.format(stdout);
+}
+
 fn handleInterfaceStats(allocator: std.mem.Allocator, iface_name: []const u8) !void {
     const stdout = std.io.getStdOut().writer();
 
@@ -1871,6 +2084,11 @@ fn printUsage() !void {
         \\  topology children <interface>  Show child interfaces
         \\
         \\  interface <name> stats         Show interface statistics
+        \\
+        \\  diagnose                       Show diagnose help
+        \\  diagnose ping <target>         Native ICMP ping
+        \\  diagnose trace <target>        Native ICMP traceroute
+        \\  diagnose capture [iface]       Native packet capture
         \\
         \\Options:
         \\  -h, --help       Show this help message
