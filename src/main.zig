@@ -37,7 +37,7 @@ const validate = @import("diagnostics/validate.zig");
 const watch = @import("diagnostics/watch.zig");
 const linux = std.os.linux;
 
-const version = "0.5.0";
+const version = "0.6.0";
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -3807,86 +3807,49 @@ fn printUsage() !void {
         \\
         \\Usage: wire <command> [options]
         \\
-        \\Commands:
+        \\Interface & Address Management:
         \\  interface                      List all interfaces
-        \\  interface <name> show          Show interface details
-        \\  interface <name> set state up  Bring interface up
-        \\  interface <name> set state down Bring interface down
-        \\  interface <name> set mtu <n>   Set interface MTU
-        \\  interface <name> address <ip>  Add IP address (e.g., 10.0.0.1/24)
-        \\  interface <name> address del <ip>  Delete IP address
-        \\
+        \\  interface <name>               Show interface details
         \\  route                          Show routing table
-        \\  route show                     Show routing table
-        \\  route add <dst> via <gw>       Add route via gateway
-        \\  route add <dst> dev <iface>    Add route via interface
-        \\  route add default via <gw>     Add default route
-        \\  route del <dst>                Delete route
+        \\  neighbor                       Show ARP/NDP table
         \\
-        \\  bond                           List bonds (show help)
-        \\  bridge                         List bridges (show help)
-        \\  bridge <name> fdb              Show bridge FDB entries
-        \\  bridge fdb                     Show all FDB entries
-        \\  vlan                           VLAN help
-        \\  veth                           Veth pair help
+        \\Virtual Interfaces:
+        \\  bond                           Bond interface management
+        \\  bridge                         Bridge interface management
+        \\  vlan                           VLAN interface management
+        \\  veth                           Veth pair management
+        \\  tunnel                         VXLAN/GRE tunnel management
         \\
-        \\  apply <config-file>            Apply configuration file
-        \\  apply <config-file> --dry-run  Validate without applying
-        \\  validate <config-file>         Validate configuration file
-        \\  diff <config-file>             Compare config against live state
+        \\Advanced Networking:
+        \\  rule                           IP policy routing rules
+        \\  netns                          Network namespace management
+        \\  tc                             Traffic control (qdiscs)
+        \\  hw                             Hardware tuning (ethtool)
+        \\
+        \\Configuration:
+        \\  apply <config>                 Apply configuration file
+        \\  validate <config>              Validate configuration
+        \\  diff <config>                  Compare config vs live state
         \\  state                          Show current network state
-        \\  events [seconds]               Monitor network events (default 10s)
-        \\  reconcile <config> [--dry-run] Apply changes to match config
         \\
-        \\  daemon start [config]          Start the supervision daemon
-        \\  daemon stop                    Stop the daemon
-        \\  daemon status                  Show daemon status
-        \\  daemon reload                  Reload configuration
-        \\
+        \\Diagnostics:
+        \\  topology                       Show network topology
+        \\  diagnose                       Network diagnostics (ping, trace, capture)
+        \\  trace <if> to <ip>             Trace path to destination
+        \\  probe <host> <port>            Test TCP connectivity
+        \\  watch <target>                 Continuous monitoring
         \\  analyze                        Analyze network configuration
         \\
-        \\  history                        Show recent changes (last 10)
-        \\  history show [N]               Show last N changes
-        \\  history snapshot               Create a state snapshot now
-        \\  history list                   List available snapshots
-        \\  history diff <timestamp>       Compare current state to snapshot
-        \\  history log                    Show full change history
-        \\
-        \\  neighbor                       Show neighbor (ARP/NDP) table
-        \\  neighbor show [interface]      Show neighbors, optionally for interface
-        \\  neighbor lookup <ip>           Lookup neighbor by IP address
-        \\  neighbor arp                   Show IPv4 ARP table only
-        \\
-        \\  topology                       Show network topology
-        \\  topology show                  Display interface hierarchy
-        \\  topology path <src> to <dst>   Find path between interfaces
-        \\  topology children <interface>  Show child interfaces
-        \\
-        \\  interface <name> stats         Show interface statistics
-        \\
-        \\  diagnose                       Show diagnose help
-        \\  diagnose ping <target>         Native ICMP ping
-        \\  diagnose trace <target>        Native ICMP traceroute
-        \\  diagnose capture [iface]       Native packet capture
-        \\
-        \\  trace <iface> to <dest>        Trace network path to destination
-        \\
-        \\  probe <host> <port|service>    Test TCP connectivity to service
-        \\  probe <host> scan              Scan common ports
-        \\  probe service <name>           Lookup service port from /etc/services
+        \\Daemon & History:
+        \\  daemon                         Supervision daemon control
+        \\  events                         Monitor network events
+        \\  history                        Change history and snapshots
         \\
         \\Options:
-        \\  -h, --help       Show this help message
-        \\  -v, --version    Show version information
+        \\  -h, --help                     Show this help
+        \\  -v, --version                  Show version
         \\
-        \\Examples:
-        \\  wire interface
-        \\  wire interface eth0 show
-        \\  wire interface eth0 set state up
-        \\  wire interface eth0 set mtu 9000
-        \\  wire interface eth0 address 10.0.0.1/24
-        \\  wire route add default via 10.0.0.254
-        \\  wire analyze
+        \\Run 'wire <command>' without arguments for detailed help on each command.
         \\
     , .{});
 }
