@@ -12,6 +12,7 @@ A low-level, declarative, continuously-supervised network configuration tool for
 - **Unified syntax** - CLI commands = configuration file format
 - **Continuous supervision** - Daemon mode detects and corrects drift
 - **Network analysis** - Built-in `analyze` command for troubleshooting
+- **Native diagnostics** - Packet capture, ping, traceroute, service probing without external tools
 
 ## Quick Start
 
@@ -27,74 +28,87 @@ zig build -Dtarget=x86_64-linux-gnu
 
 ### Basic Usage
 
+#### Interface Management
+
 ```bash
-# List all interfaces
-wire interface
-
-# Show specific interface details
-wire interface eth0 show
-
-# Bring interface up/down
-wire interface eth0 set state up
-wire interface eth0 set state down
-
-# Set MTU
-wire interface eth0 set mtu 9000
-
-# Add IP address
-wire interface eth0 address 10.0.0.1/24
-
-# Delete IP address
+wire interface                          # List all interfaces
+wire interface eth0 show                # Show interface details
+wire interface eth0 set state up        # Bring interface up
+wire interface eth0 set state down      # Bring interface down
+wire interface eth0 set mtu 9000        # Set MTU
+wire interface eth0 address 10.0.0.1/24 # Add IP address
 wire interface eth0 address del 10.0.0.1/24
+wire interface eth0 stats               # Show RX/TX statistics
+```
 
-# Show routing table
-wire route
+#### Routing
 
-# Add route via gateway
+```bash
+wire route                              # Show routing table
 wire route add 192.168.0.0/16 via 10.0.0.254
-
-# Add route via interface
 wire route add 10.10.0.0/24 dev eth1
-
-# Add default route
 wire route add default via 10.0.0.1
-
-# Delete route
 wire route del 192.168.0.0/16
+```
 
-# Create veth pair
-wire veth veth0 peer veth1
+#### Bonds, Bridges, VLANs
 
-# Show veth details (including peer info)
-wire veth veth0 show
+```bash
+wire bond bond0 create mode 802.3ad
+wire bond bond0 add eth0 eth1
+wire bridge br0 create
+wire bridge br0 add eth2
+wire bridge br0 fdb                     # Show forwarding database
+wire vlan 100 on eth0                   # Create eth0.100
+```
 
-# Move veth end to namespace by PID
-wire veth veth0 netns pid 12345
+#### Veth Pairs (Container Networking)
 
-# Delete veth pair (deleting one end removes both)
-wire veth veth0 delete
+```bash
+wire veth veth0 peer veth1              # Create veth pair
+wire veth veth0 show                    # Show peer info
+wire veth veth0 netns pid 12345         # Move to namespace
+wire veth veth0 delete                  # Delete pair
+```
 
-# Show neighbor (ARP/NDP) table
-wire neighbor
+#### Diagnostics & Troubleshooting
 
-# Lookup specific neighbor
-wire neighbor lookup 10.0.0.1
+```bash
+# Neighbor table (ARP/NDP)
+wire neighbor                           # Show all entries
+wire neighbor show eth0                 # Filter by interface
+wire neighbor lookup 10.0.0.1           # Lookup specific IP
+wire neighbor arp                       # IPv4 only
 
-# Show interface statistics
-wire interface eth0 stats
+# Network topology
+wire topology                           # Show interface hierarchy
+wire trace eth0 to 10.0.0.1             # Trace path to destination
 
-# Show bridge FDB (forwarding database)
-wire bridge fdb
-wire bridge br0 fdb
+# Service probing (TCP connectivity)
+wire probe 10.0.0.1 22                  # Test port 22
+wire probe 10.0.0.1 ssh                 # Test by service name
+wire probe 10.0.0.1 scan                # Scan common ports
+wire probe service mysql                # Lookup port number
 
-# Trace network path
-wire trace eth0 to 10.0.0.1
+# Native packet capture
+wire diagnose capture eth0              # Capture on interface
+wire diagnose capture eth0 --count 10   # Capture 10 packets
 
-# Show network topology
-wire topology
+# Native ping/traceroute
+wire diagnose ping 10.0.0.1
+wire diagnose trace 10.0.0.1
 
-# Network analysis
-wire analyze
+# Analysis
+wire analyze                            # Full network analysis
+```
+
+#### Configuration Management
+
+```bash
+wire apply config.wire                  # Apply configuration
+wire apply config.wire --dry-run        # Validate only
+wire diff config.wire                   # Compare to live state
+wire state                              # Export current state
 ```
 
 ### Example Output
@@ -105,6 +119,26 @@ $ wire interface
 2: eth0: <UP,CARRIER> mtu 1500
     link/ether 00:1a:2b:3c:4d:5e
     inet 10.0.0.5/24 scope global
+
+$ wire neighbor
+Neighbor Table
+IP Address         MAC Address          State        Interface
+10.0.0.1           02:2b:c4:d0:ee:af    REACHABLE    eth0
+
+$ wire interface eth0 stats
+eth0 statistics:
+  RX: 3467702 packets, 379.77 MB
+  TX: 6671410 packets, 2.78 GB
+
+$ wire probe 10.0.0.1 scan
+Scanning 10.0.0.1 (common ports, timeout 3000ms)...
+
+10.0.0.1:22/tcp OPEN (205us)
+10.0.0.1:80/tcp CLOSED (connection refused)
+10.0.0.1:443/tcp CLOSED (connection refused)
+10.0.0.1:3306/tcp CLOSED (connection refused)
+10.0.0.1:5432/tcp CLOSED (connection refused)
+10.0.0.1:6379/tcp CLOSED (connection refused)
 
 $ wire analyze
 
@@ -119,16 +153,6 @@ Interfaces (2 total)
 Routing
 -------
 [ok] default via 10.0.0.1
-
-$ wire neighbor
-Neighbor Table
-IP Address         MAC Address          State        Interface
-10.0.0.1           02:2b:c4:d0:ee:af    REACHABLE    eth0
-
-$ wire interface eth0 stats
-eth0 statistics:
-  RX: 3467702 packets, 379.77 MB
-  TX: 6671410 packets, 2.78 GB
 ```
 
 ## Target Environments
@@ -136,6 +160,7 @@ eth0 statistics:
 - Linux servers
 - Routers and network appliances
 - Enterprise network infrastructure
+- Container hosts and orchestration nodes
 
 ## Out of Scope
 
@@ -146,17 +171,18 @@ eth0 statistics:
 
 ## Roadmap
 
-- **v0.1 (MVP)** - Basic interface, address, route management
-- **v0.2** - Configuration files, bonds, bridges, VLANs
-- **v0.3** - Daemon mode with drift detection
-- **v0.4** - Validation, hints, and analysis
-- **v0.5** - Diagnostics and third-party tool integration
+- **v0.1** - Basic interface, address, route management ✓
+- **v0.2** - Configuration files, bonds, bridges, VLANs ✓
+- **v0.3** - Daemon mode with drift detection ✓
+- **v0.4** - Validation, hints, and analysis ✓
+- **v0.5** - Diagnostics and topology-aware troubleshooting ✓
 - **v1.0** - Production ready
 
 ## Requirements
 
 - Linux kernel 3.10+ (netlink support)
 - CAP_NET_ADMIN capability for network configuration
+- No external dependencies (pure Zig, statically linked)
 
 ## License
 

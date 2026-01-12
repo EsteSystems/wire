@@ -27,6 +27,7 @@ const native_ping = @import("plugins/native/ping.zig");
 const native_trace = @import("plugins/native/traceroute.zig");
 const native_capture = @import("plugins/native/capture.zig");
 const path_trace = @import("diagnostics/trace.zig");
+const probe = @import("diagnostics/probe.zig");
 const linux = std.os.linux;
 
 const version = "0.5.0";
@@ -110,6 +111,8 @@ fn executeCommand(allocator: std.mem.Allocator, args: []const []const u8) !void 
         try handleDiagnose(allocator, args[1..]);
     } else if (std.mem.eql(u8, subject, "trace")) {
         try handlePathTrace(allocator, args[1..]);
+    } else if (std.mem.eql(u8, subject, "probe")) {
+        try handleProbe(allocator, args[1..]);
     } else {
         const stderr = std.io.getStdErr().writer();
         try stderr.print("Unknown command: {s}\n", .{subject});
@@ -2269,6 +2272,90 @@ fn handlePathTrace(allocator: std.mem.Allocator, args: []const []const u8) !void
     try trace.format(stdout);
 }
 
+fn handleProbe(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    const stdout = std.io.getStdOut().writer();
+
+    if (args.len == 0) {
+        try stdout.print("Probe commands:\n", .{});
+        try stdout.print("  probe <host> <port|service>     Test TCP connectivity\n", .{});
+        try stdout.print("  probe <host> <port> --timeout <ms>  With custom timeout\n", .{});
+        try stdout.print("  probe <host> scan               Scan common ports\n", .{});
+        try stdout.print("  probe service <name>            Lookup service port\n", .{});
+        try stdout.print("\nExamples:\n", .{});
+        try stdout.print("  wire probe 10.0.0.1 22          Test SSH port\n", .{});
+        try stdout.print("  wire probe 10.0.0.1 ssh         Test SSH by name\n", .{});
+        try stdout.print("  wire probe 10.0.0.1 http        Test HTTP port\n", .{});
+        try stdout.print("  wire probe 10.0.0.1 scan        Scan common ports\n", .{});
+        try stdout.print("  wire probe service ssh          Show SSH port number\n", .{});
+        return;
+    }
+
+    const first_arg = args[0];
+
+    // wire probe service <name> - lookup service
+    if (std.mem.eql(u8, first_arg, "service")) {
+        if (args.len < 2) {
+            try stdout.print("Usage: wire probe service <name>\n", .{});
+            return;
+        }
+        const service_name = args[1];
+        if (probe.lookupService(allocator, service_name, null) catch null) |service| {
+            try stdout.print("{s}: {d}/{s}\n", .{ service.name, service.port, service.protocol.toString() });
+        } else {
+            try stdout.print("Service '{s}' not found in /etc/services\n", .{service_name});
+        }
+        return;
+    }
+
+    // wire probe <host> <port|service|scan>
+    if (args.len < 2) {
+        try stdout.print("Usage: wire probe <host> <port|service>\n", .{});
+        return;
+    }
+
+    const target = first_arg;
+    const port_or_cmd = args[1];
+
+    // Parse timeout if provided
+    var timeout_ms: u32 = 3000; // Default 3 seconds
+    var i: usize = 2;
+    while (i + 1 < args.len) : (i += 1) {
+        if (std.mem.eql(u8, args[i], "--timeout") or std.mem.eql(u8, args[i], "-t")) {
+            timeout_ms = std.fmt.parseInt(u32, args[i + 1], 10) catch {
+                try stdout.print("Invalid timeout: {s}\n", .{args[i + 1]});
+                return;
+            };
+            i += 1;
+        }
+    }
+
+    // wire probe <host> scan - scan common ports
+    if (std.mem.eql(u8, port_or_cmd, "scan")) {
+        try stdout.print("Scanning {s} (common ports, timeout {d}ms)...\n\n", .{ target, timeout_ms });
+
+        for (probe.CommonPorts.quick_scan) |port| {
+            const result = probe.probeTcp(target, port, timeout_ms);
+            try result.format(stdout);
+        }
+        return;
+    }
+
+    // Resolve port from service name or number
+    const port = probe.resolvePort(allocator, port_or_cmd, .tcp) catch |err| {
+        if (err == error.UnknownService) {
+            try stdout.print("Unknown service: {s}\n", .{port_or_cmd});
+            try stdout.print("Use a port number or a service name from /etc/services\n", .{});
+        } else {
+            try stdout.print("Failed to resolve port: {}\n", .{err});
+        }
+        return;
+    };
+
+    // Probe the port
+    const result = probe.probeTcp(target, port, timeout_ms);
+    try result.format(stdout);
+}
+
 fn handleInterfaceStats(allocator: std.mem.Allocator, iface_name: []const u8) !void {
     const stdout = std.io.getStdOut().writer();
 
@@ -2361,6 +2448,10 @@ fn printUsage() !void {
         \\  diagnose capture [iface]       Native packet capture
         \\
         \\  trace <iface> to <dest>        Trace network path to destination
+        \\
+        \\  probe <host> <port|service>    Test TCP connectivity to service
+        \\  probe <host> scan              Scan common ports
+        \\  probe service <name>           Lookup service port from /etc/services
         \\
         \\Options:
         \\  -h, --help       Show this help message
