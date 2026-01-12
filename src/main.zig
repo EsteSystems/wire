@@ -708,10 +708,18 @@ fn handleBridge(allocator: std.mem.Allocator, args: []const []const u8) !void {
         try stdout.print("  bridge <name> delete           Delete bridge\n", .{});
         try stdout.print("  bridge <name> show             Show bridge details\n", .{});
         try stdout.print("  bridge <name> stp on|off       Enable/disable STP\n", .{});
+        try stdout.print("  bridge <name> fdb              Show FDB (forwarding database)\n", .{});
+        try stdout.print("  bridge fdb                     Show all FDB entries\n", .{});
         return;
     }
 
     const bridge_name = args[0];
+
+    // wire bridge fdb - show all FDB entries
+    if (std.mem.eql(u8, bridge_name, "fdb")) {
+        try showAllBridgeFdb(allocator, stdout);
+        return;
+    }
 
     if (args.len == 1) {
         // wire bridge <name> - show bridge details
@@ -791,6 +799,12 @@ fn handleBridge(allocator: std.mem.Allocator, args: []const []const u8) !void {
         return;
     }
 
+    // wire bridge <name> fdb
+    if (std.mem.eql(u8, action, "fdb")) {
+        try showBridgeFdb(allocator, bridge_name, stdout);
+        return;
+    }
+
     try stdout.print("Unknown bridge action: {s}\n", .{action});
 }
 
@@ -828,6 +842,110 @@ fn showBridgeDetails(allocator: std.mem.Allocator, name: []const u8, stdout: any
         const addr_str = try addr.formatAddress(&addr_buf);
         const family = if (addr.isIPv4()) "inet" else "inet6";
         try stdout.print("    {s} {s} scope {s}\n", .{ family, addr_str, addr.scopeString() });
+    }
+}
+
+fn showBridgeFdb(allocator: std.mem.Allocator, bridge_name: []const u8, stdout: anytype) !void {
+    // Get FDB entries for the bridge
+    const entries = netlink_bridge.getBridgeFdb(allocator, bridge_name) catch |err| {
+        try stdout.print("Failed to get FDB entries: {}\n", .{err});
+        return;
+    };
+    defer allocator.free(entries);
+
+    // Get interfaces for name lookup
+    const interfaces = netlink_interface.getInterfaces(allocator) catch |err| {
+        try stdout.print("Failed to query interfaces: {}\n", .{err});
+        return;
+    };
+    defer allocator.free(interfaces);
+
+    if (entries.len == 0) {
+        try stdout.print("No FDB entries for {s}\n", .{bridge_name});
+        return;
+    }
+
+    try stdout.print("FDB for {s} ({d} entries)\n", .{ bridge_name, entries.len });
+    try stdout.print("{s:<20} {s:<6} {s:<12} {s:<12}\n", .{ "MAC Address", "VLAN", "State", "Port" });
+    try stdout.print("{s:-<20} {s:-<6} {s:-<12} {s:-<12}\n", .{ "", "", "", "" });
+
+    for (entries) |*entry| {
+        const mac_str = entry.formatMac();
+
+        // VLAN
+        var vlan_buf: [8]u8 = undefined;
+        const vlan_str = if (entry.vlan) |v|
+            std.fmt.bufPrint(&vlan_buf, "{d}", .{v}) catch "-"
+        else
+            "-";
+
+        // Resolve interface name
+        var if_name: []const u8 = "?";
+        for (interfaces) |iface| {
+            if (iface.index == entry.interface_index) {
+                if_name = iface.getName();
+                break;
+            }
+        }
+
+        try stdout.print("{s:<20} {s:<6} {s:<12} {s:<12}\n", .{
+            mac_str,
+            vlan_str,
+            entry.stateString(),
+            if_name,
+        });
+    }
+}
+
+fn showAllBridgeFdb(allocator: std.mem.Allocator, stdout: anytype) !void {
+    // Get all FDB entries
+    const entries = netlink_bridge.getAllFdb(allocator) catch |err| {
+        try stdout.print("Failed to get FDB entries: {}\n", .{err});
+        return;
+    };
+    defer allocator.free(entries);
+
+    // Get interfaces for name lookup
+    const interfaces = netlink_interface.getInterfaces(allocator) catch |err| {
+        try stdout.print("Failed to query interfaces: {}\n", .{err});
+        return;
+    };
+    defer allocator.free(interfaces);
+
+    if (entries.len == 0) {
+        try stdout.print("No FDB entries found.\n", .{});
+        return;
+    }
+
+    try stdout.print("Bridge FDB ({d} entries)\n", .{entries.len});
+    try stdout.print("{s:<20} {s:<6} {s:<12} {s:<12}\n", .{ "MAC Address", "VLAN", "State", "Interface" });
+    try stdout.print("{s:-<20} {s:-<6} {s:-<12} {s:-<12}\n", .{ "", "", "", "" });
+
+    for (entries) |*entry| {
+        const mac_str = entry.formatMac();
+
+        // VLAN
+        var vlan_buf: [8]u8 = undefined;
+        const vlan_str = if (entry.vlan) |v|
+            std.fmt.bufPrint(&vlan_buf, "{d}", .{v}) catch "-"
+        else
+            "-";
+
+        // Resolve interface name
+        var if_name: []const u8 = "?";
+        for (interfaces) |iface| {
+            if (iface.index == entry.interface_index) {
+                if_name = iface.getName();
+                break;
+            }
+        }
+
+        try stdout.print("{s:<20} {s:<6} {s:<12} {s:<12}\n", .{
+            mac_str,
+            vlan_str,
+            entry.stateString(),
+            if_name,
+        });
     }
 }
 
@@ -2198,6 +2316,8 @@ fn printUsage() !void {
         \\
         \\  bond                           List bonds (show help)
         \\  bridge                         List bridges (show help)
+        \\  bridge <name> fdb              Show bridge FDB entries
+        \\  bridge fdb                     Show all FDB entries
         \\  vlan                           VLAN help
         \\  veth                           Veth pair help
         \\

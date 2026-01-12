@@ -10,7 +10,7 @@ A low-level, declarative, continuously-supervised network configuration tool for
 
 - **Direct netlink operation** - No command wrapping, no dependencies on iproute2
 - **Unified syntax** - CLI commands = configuration file format
-- **Continuous supervision** - Daemon mode detects and corrects drift (coming soon)
+- **Continuous supervision** - Daemon mode detects and corrects drift
 - **Network analysis** - Built-in `analyze` command for troubleshooting
 
 ## Quick Start
@@ -62,6 +62,37 @@ wire route add default via 10.0.0.1
 # Delete route
 wire route del 192.168.0.0/16
 
+# Create veth pair
+wire veth veth0 peer veth1
+
+# Show veth details (including peer info)
+wire veth veth0 show
+
+# Move veth end to namespace by PID
+wire veth veth0 netns pid 12345
+
+# Delete veth pair (deleting one end removes both)
+wire veth veth0 delete
+
+# Show neighbor (ARP/NDP) table
+wire neighbor
+
+# Lookup specific neighbor
+wire neighbor lookup 10.0.0.1
+
+# Show interface statistics
+wire interface eth0 stats
+
+# Show bridge FDB (forwarding database)
+wire bridge fdb
+wire bridge br0 fdb
+
+# Trace network path
+wire trace eth0 to 10.0.0.1
+
+# Show network topology
+wire topology
+
 # Network analysis
 wire analyze
 ```
@@ -88,6 +119,16 @@ Interfaces (2 total)
 Routing
 -------
 [ok] default via 10.0.0.1
+
+$ wire neighbor
+Neighbor Table
+IP Address         MAC Address          State        Interface
+10.0.0.1           02:2b:c4:d0:ee:af    REACHABLE    eth0
+
+$ wire interface eth0 stats
+eth0 statistics:
+  RX: 3467702 packets, 379.77 MB
+  TX: 6671410 packets, 2.78 GB
 ```
 
 ## Target Environments
@@ -119,4 +160,4 @@ Routing
 
 ## License
 
-TBD
+BSD
