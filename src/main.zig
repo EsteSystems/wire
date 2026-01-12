@@ -28,6 +28,8 @@ const native_trace = @import("plugins/native/traceroute.zig");
 const native_capture = @import("plugins/native/capture.zig");
 const path_trace = @import("diagnostics/trace.zig");
 const probe = @import("diagnostics/probe.zig");
+const validate = @import("diagnostics/validate.zig");
+const watch = @import("diagnostics/watch.zig");
 const linux = std.os.linux;
 
 const version = "0.5.0";
@@ -113,6 +115,10 @@ fn executeCommand(allocator: std.mem.Allocator, args: []const []const u8) !void 
         try handlePathTrace(allocator, args[1..]);
     } else if (std.mem.eql(u8, subject, "probe")) {
         try handleProbe(allocator, args[1..]);
+    } else if (std.mem.eql(u8, subject, "validate")) {
+        try handleValidate(allocator, args[1..]);
+    } else if (std.mem.eql(u8, subject, "watch")) {
+        try handleWatch(allocator, args[1..]);
     } else {
         const stderr = std.io.getStdErr().writer();
         try stderr.print("Unknown command: {s}\n", .{subject});
@@ -535,39 +541,6 @@ fn handleApply(allocator: std.mem.Allocator, args: []const []const u8) !void {
 
     if (!result.success) {
         std.process.exit(1);
-    }
-}
-
-fn handleValidate(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
-
-    if (args.len == 0) {
-        try stdout.print("Usage: wire validate <config-file>\n", .{});
-        return;
-    }
-
-    const config_path = args[0];
-
-    var report = config_loader.validateConfig(config_path, allocator) catch |err| {
-        try stdout.print("Failed to validate configuration: {}\n", .{err});
-        return;
-    };
-    defer report.deinit(allocator);
-
-    try stdout.print("Validation Report\n", .{});
-    try stdout.print("-----------------\n", .{});
-    try stdout.print("Total commands: {d}\n", .{report.total_commands});
-    try stdout.print("Valid: {d}\n", .{report.valid_commands});
-    try stdout.print("Errors: {d}\n", .{report.errors});
-
-    if (report.errors > 0) {
-        try stdout.print("\nErrors:\n", .{});
-        for (report.error_messages) |msg| {
-            try stdout.print("  - {s}\n", .{msg});
-        }
-        std.process.exit(1);
-    } else {
-        try stdout.print("\nConfiguration is valid.\n", .{});
     }
 }
 
@@ -2354,6 +2327,257 @@ fn handleProbe(allocator: std.mem.Allocator, args: []const []const u8) !void {
     // Probe the port
     const result = probe.probeTcp(target, port, timeout_ms);
     try result.format(stdout);
+}
+
+fn handleValidate(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    const stdout = std.io.getStdOut().writer();
+
+    if (args.len == 0) {
+        try stdout.print("Validate commands:\n", .{});
+        try stdout.print("  validate config <file>              Validate configuration file\n", .{});
+        try stdout.print("  validate vlan <id> on <interface>   Validate VLAN configuration\n", .{});
+        try stdout.print("  validate path <iface> to <dest>     Validate network path\n", .{});
+        try stdout.print("  validate service <host> <port>      Validate service connectivity\n", .{});
+        try stdout.print("\nExamples:\n", .{});
+        try stdout.print("  wire validate config /etc/wire/network.wire\n", .{});
+        try stdout.print("  wire validate vlan 100 on eth0\n", .{});
+        try stdout.print("  wire validate path eth0 to 10.0.0.1\n", .{});
+        try stdout.print("  wire validate service 10.0.0.1 ssh\n", .{});
+        return;
+    }
+
+    const subcommand = args[0];
+
+    // wire validate config <file>
+    if (std.mem.eql(u8, subcommand, "config")) {
+        if (args.len < 2) {
+            try stdout.print("Usage: wire validate config <config-file>\n", .{});
+            return;
+        }
+
+        const config_path = args[1];
+
+        var report = config_loader.validateConfig(config_path, allocator) catch |err| {
+            try stdout.print("Failed to validate configuration: {}\n", .{err});
+            return;
+        };
+        defer report.deinit(allocator);
+
+        try stdout.print("Validation Report\n", .{});
+        try stdout.print("-----------------\n", .{});
+        try stdout.print("Total commands: {d}\n", .{report.total_commands});
+        try stdout.print("Valid: {d}\n", .{report.valid_commands});
+        try stdout.print("Errors: {d}\n", .{report.errors});
+
+        if (report.errors > 0) {
+            try stdout.print("\nErrors:\n", .{});
+            for (report.error_messages) |msg| {
+                try stdout.print("  - {s}\n", .{msg});
+            }
+            std.process.exit(1);
+        } else {
+            try stdout.print("\nConfiguration is valid.\n", .{});
+        }
+        return;
+    }
+
+    // wire validate vlan <id> on <interface>
+    if (std.mem.eql(u8, subcommand, "vlan")) {
+        if (args.len < 4) {
+            try stdout.print("Usage: wire validate vlan <id> on <interface>\n", .{});
+            return;
+        }
+
+        const vlan_id = std.fmt.parseInt(u16, args[1], 10) catch {
+            try stdout.print("Invalid VLAN ID: {s}\n", .{args[1]});
+            return;
+        };
+
+        // Expect "on" keyword
+        if (!std.mem.eql(u8, args[2], "on")) {
+            try stdout.print("Usage: wire validate vlan <id> on <interface>\n", .{});
+            return;
+        }
+
+        const parent = args[3];
+
+        try stdout.print("Validating VLAN {d} on {s}...\n\n", .{ vlan_id, parent });
+
+        var result = validate.validateVlan(allocator, vlan_id, parent) catch |err| {
+            try stdout.print("Validation failed: {}\n", .{err});
+            return;
+        };
+        defer result.deinit();
+
+        try result.format(stdout);
+        return;
+    }
+
+    // wire validate path <iface> to <dest>
+    if (std.mem.eql(u8, subcommand, "path")) {
+        if (args.len < 4) {
+            try stdout.print("Usage: wire validate path <interface> to <destination>\n", .{});
+            return;
+        }
+
+        const source_iface = args[1];
+
+        // Expect "to" keyword
+        if (!std.mem.eql(u8, args[2], "to")) {
+            try stdout.print("Usage: wire validate path <interface> to <destination>\n", .{});
+            return;
+        }
+
+        const destination = args[3];
+
+        try stdout.print("Validating path from {s} to {s}...\n\n", .{ source_iface, destination });
+
+        var result = validate.validatePath(allocator, source_iface, destination) catch |err| {
+            try stdout.print("Validation failed: {}\n", .{err});
+            return;
+        };
+        defer result.deinit();
+
+        try result.format(stdout);
+        return;
+    }
+
+    // wire validate service <host> <port|service>
+    if (std.mem.eql(u8, subcommand, "service")) {
+        if (args.len < 3) {
+            try stdout.print("Usage: wire validate service <host> <port|service>\n", .{});
+            return;
+        }
+
+        const host = args[1];
+        const port_or_service = args[2];
+
+        try stdout.print("Validating service {s} on {s}...\n\n", .{ port_or_service, host });
+
+        var result = validate.validateService(allocator, host, port_or_service) catch |err| {
+            try stdout.print("Validation failed: {}\n", .{err});
+            return;
+        };
+        defer result.deinit();
+
+        try result.format(stdout);
+        return;
+    }
+
+    try stdout.print("Unknown validate subcommand: {s}\n", .{subcommand});
+    try stdout.print("Available: config, vlan, path, service\n", .{});
+}
+
+fn handleWatch(allocator: std.mem.Allocator, args: []const []const u8) !void {
+    const stdout = std.io.getStdOut().writer();
+
+    if (args.len == 0) {
+        try stdout.print("Watch commands:\n", .{});
+        try stdout.print("  watch <host> <port|service>         Watch service connectivity\n", .{});
+        try stdout.print("  watch <host> <port> --interval <ms> Set probe interval (default 1000)\n", .{});
+        try stdout.print("  watch <host> <port> --alert <ms>    Alert if latency exceeds threshold\n", .{});
+        try stdout.print("  watch interface <name>              Watch interface status\n", .{});
+        try stdout.print("\nExamples:\n", .{});
+        try stdout.print("  wire watch 10.0.0.1 ssh\n", .{});
+        try stdout.print("  wire watch 10.0.0.1 80 --interval 500\n", .{});
+        try stdout.print("  wire watch 10.0.0.1 443 --alert 100\n", .{});
+        try stdout.print("  wire watch interface eth0\n", .{});
+        return;
+    }
+
+    const first_arg = args[0];
+
+    // wire watch interface <name>
+    if (std.mem.eql(u8, first_arg, "interface")) {
+        if (args.len < 2) {
+            try stdout.print("Usage: wire watch interface <name>\n", .{});
+            return;
+        }
+
+        const iface_name = args[1];
+        var interval_ms: u32 = 1000;
+
+        // Parse options
+        var i: usize = 2;
+        while (i + 1 < args.len) : (i += 1) {
+            if (std.mem.eql(u8, args[i], "--interval") or std.mem.eql(u8, args[i], "-i")) {
+                interval_ms = std.fmt.parseInt(u32, args[i + 1], 10) catch {
+                    try stdout.print("Invalid interval: {s}\n", .{args[i + 1]});
+                    return;
+                };
+                i += 1;
+            }
+        }
+
+        watch.watchInterface(allocator, iface_name, interval_ms, null, stdout) catch |err| {
+            try stdout.print("Watch failed: {}\n", .{err});
+        };
+        return;
+    }
+
+    // wire watch <host> <port|service> [options]
+    if (args.len < 2) {
+        try stdout.print("Usage: wire watch <host> <port|service>\n", .{});
+        return;
+    }
+
+    const target = first_arg;
+    const port_or_service = args[1];
+
+    // Resolve port
+    const port = probe.resolvePort(allocator, port_or_service, .tcp) catch |err| {
+        if (err == error.UnknownService) {
+            try stdout.print("Unknown service: {s}\n", .{port_or_service});
+        } else {
+            try stdout.print("Failed to resolve port: {}\n", .{err});
+        }
+        return;
+    };
+
+    // Parse options
+    var interval_ms: u32 = 1000;
+    var timeout_ms: u32 = 3000;
+    var alert_threshold_ms: ?u32 = null;
+
+    var i: usize = 2;
+    while (i + 1 < args.len) : (i += 1) {
+        if (std.mem.eql(u8, args[i], "--interval") or std.mem.eql(u8, args[i], "-i")) {
+            interval_ms = std.fmt.parseInt(u32, args[i + 1], 10) catch {
+                try stdout.print("Invalid interval: {s}\n", .{args[i + 1]});
+                return;
+            };
+            i += 1;
+        } else if (std.mem.eql(u8, args[i], "--timeout") or std.mem.eql(u8, args[i], "-t")) {
+            timeout_ms = std.fmt.parseInt(u32, args[i + 1], 10) catch {
+                try stdout.print("Invalid timeout: {s}\n", .{args[i + 1]});
+                return;
+            };
+            i += 1;
+        } else if (std.mem.eql(u8, args[i], "--alert") or std.mem.eql(u8, args[i], "-a")) {
+            alert_threshold_ms = std.fmt.parseInt(u32, args[i + 1], 10) catch {
+                try stdout.print("Invalid alert threshold: {s}\n", .{args[i + 1]});
+                return;
+            };
+            i += 1;
+        }
+    }
+
+    const config = watch.WatchConfig{
+        .target = target,
+        .port = port,
+        .interval_ms = interval_ms,
+        .timeout_ms = timeout_ms,
+        .alert_threshold_ms = alert_threshold_ms,
+        .alert_on_failure = true,
+        .max_iterations = null,
+    };
+
+    const watch_stats = watch.watch(config, stdout) catch |err| {
+        try stdout.print("Watch failed: {}\n", .{err});
+        return;
+    };
+
+    try watch_stats.format(stdout);
 }
 
 fn handleInterfaceStats(allocator: std.mem.Allocator, iface_name: []const u8) !void {

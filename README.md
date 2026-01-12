@@ -102,6 +102,24 @@ wire diagnose trace 10.0.0.1
 wire analyze                            # Full network analysis
 ```
 
+#### Validation
+
+```bash
+wire validate config network.wire       # Validate configuration file
+wire validate vlan 100 on eth0          # Validate VLAN setup
+wire validate path eth0 to 10.0.0.1     # Validate network path
+wire validate service 10.0.0.1 ssh      # Validate service connectivity
+```
+
+#### Continuous Monitoring
+
+```bash
+wire watch 10.0.0.1 22                  # Watch service (default 1s interval)
+wire watch 10.0.0.1 ssh --interval 500  # Custom interval (ms)
+wire watch 10.0.0.1 80 --alert 100      # Alert if latency > 100ms
+wire watch interface eth0               # Watch interface status
+```
+
 #### Configuration Management
 
 ```bash
@@ -153,6 +171,29 @@ Interfaces (2 total)
 Routing
 -------
 [ok] default via 10.0.0.1
+
+$ wire validate path eth0 to 10.0.0.1
+Validating path from eth0 to 10.0.0.1...
+
+[PASS] Source interface exists: eth0
+[PASS] Source is UP: Interface is up
+[PASS] Source has carrier: Link detected
+[PASS] Build topology: Topology graph built
+[PASS] Path source ready: Source interface operational
+[PASS] Destination reachable: TCP connection successful
+
+Validation PASSED
+
+$ wire watch 10.0.0.1 22 --alert 50
+Watching 10.0.0.1:22 (interval=1000ms, timeout=3000ms)
+Alert threshold: 50ms
+Press Ctrl+C to stop
+
+[0.001] . 432us
+[1.003] . 587us
+[2.008] . 1.2ms ALERT: High latency
+[3.012] . 445us
+^C
 ```
 
 ## Target Environments
