@@ -509,30 +509,48 @@ fn handleApply(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const stdout = std.io.getStdOut().writer();
 
     if (args.len == 0) {
-        try stdout.print("Usage: wire apply <config-file> [--dry-run] [--yes]\n", .{});
+        try stdout.print("Usage: wire apply <config-file> [options]\n", .{});
         try stdout.print("\nOptions:\n", .{});
         try stdout.print("  --dry-run, -n    Validate without applying changes\n", .{});
         try stdout.print("  --yes, -y        Skip confirmation prompt\n", .{});
+        try stdout.print("  --force          Apply despite errors (use with caution)\n", .{});
+        try stdout.print("  --strict         Fail on warnings too (for CI/CD)\n", .{});
+        try stdout.print("  --staging        Relaxed validation (for staging environments)\n", .{});
+        try stdout.print("  --verbose, -v    Show detailed output\n", .{});
         return;
     }
 
     const config_path = args[0];
-    var dry_run = false;
-    var skip_confirmation = false;
+    var options = config_loader.ApplyOptions{};
 
     // Check for flags
     for (args[1..]) |arg| {
         if (std.mem.eql(u8, arg, "--dry-run") or std.mem.eql(u8, arg, "-n")) {
-            dry_run = true;
+            options.dry_run = true;
         } else if (std.mem.eql(u8, arg, "--yes") or std.mem.eql(u8, arg, "-y")) {
-            skip_confirmation = true;
+            options.skip_confirmation = true;
+        } else if (std.mem.eql(u8, arg, "--force")) {
+            options.force = true;
+        } else if (std.mem.eql(u8, arg, "--strict")) {
+            options.strict = true;
+        } else if (std.mem.eql(u8, arg, "--staging")) {
+            options.staging = true;
+        } else if (std.mem.eql(u8, arg, "--verbose") or std.mem.eql(u8, arg, "-v")) {
+            options.verbose = true;
         }
     }
 
-    const options = config_loader.ApplyOptions{
-        .dry_run = dry_run,
-        .skip_confirmation = skip_confirmation,
-    };
+    // Warn about conflicting options
+    if (options.force and options.strict) {
+        try stdout.print("Warning: --force and --strict are conflicting options\n", .{});
+        try stdout.print("  --force will apply despite errors, --strict will fail on warnings\n", .{});
+        try stdout.print("  Using --force takes precedence\n\n", .{});
+    }
+
+    if (options.staging) {
+        try stdout.print("Staging mode: Validation warnings will be logged but not block.\n", .{});
+        try stdout.print("Unreachable gateways and missing dependencies are expected.\n\n", .{});
+    }
 
     const result = config_loader.applyConfig(config_path, allocator, options) catch |err| {
         try stdout.print("Failed to apply configuration: {}\n", .{err});
@@ -549,12 +567,18 @@ fn handleBond(allocator: std.mem.Allocator, args: []const []const u8) !void {
 
     if (args.len == 0) {
         try stdout.print("Bond commands:\n", .{});
-        try stdout.print("  bond <name> create mode <mode> Create bond\n", .{});
-        try stdout.print("  bond <name> add <member>       Add member to bond\n", .{});
-        try stdout.print("  bond <name> del <member>       Remove member from bond\n", .{});
-        try stdout.print("  bond <name> delete             Delete bond\n", .{});
-        try stdout.print("  bond <name> show               Show bond details\n", .{});
+        try stdout.print("  bond <name> create mode <mode> [options]  Create bond\n", .{});
+        try stdout.print("  bond <name> add <member>                  Add member to bond\n", .{});
+        try stdout.print("  bond <name> del <member>                  Remove member from bond\n", .{});
+        try stdout.print("  bond <name> delete                        Delete bond\n", .{});
+        try stdout.print("  bond <name> show                          Show bond details\n", .{});
         try stdout.print("\nModes: balance-rr, active-backup, balance-xor, broadcast, 802.3ad, balance-tlb, balance-alb\n", .{});
+        try stdout.print("\nLACP options (for 802.3ad mode):\n", .{});
+        try stdout.print("  lacp_rate <slow|fast>          LACP rate (default: slow)\n", .{});
+        try stdout.print("  xmit_hash <layer2|layer3+4|layer2+3>  Hash policy (default: layer2)\n", .{});
+        try stdout.print("  ad_select <stable|bandwidth|count>    Aggregator selection (default: stable)\n", .{});
+        try stdout.print("\nExamples:\n", .{});
+        try stdout.print("  wire bond bond0 create mode 802.3ad lacp_rate fast xmit_hash layer3+4\n", .{});
         return;
     }
 
@@ -568,28 +592,67 @@ fn handleBond(allocator: std.mem.Allocator, args: []const []const u8) !void {
 
     const action = args[1];
 
-    // wire bond <name> create mode <mode>
+    // wire bond <name> create mode <mode> [options]
     if (std.mem.eql(u8, action, "create")) {
-        var mode: netlink_bond.BondMode = .balance_rr; // default
+        var options = netlink_bond.BondOptions{};
 
-        // Look for mode
+        // Parse options
         var i: usize = 2;
         while (i < args.len) : (i += 1) {
             if (std.mem.eql(u8, args[i], "mode") and i + 1 < args.len) {
-                mode = netlink_bond.BondMode.fromString(args[i + 1]) orelse {
+                options.mode = netlink_bond.BondMode.fromString(args[i + 1]) orelse {
                     try stdout.print("Invalid bond mode: {s}\n", .{args[i + 1]});
                     try stdout.print("Valid modes: balance-rr, active-backup, balance-xor, broadcast, 802.3ad, balance-tlb, balance-alb\n", .{});
+                    return;
+                };
+                i += 1;
+            } else if (std.mem.eql(u8, args[i], "lacp_rate") and i + 1 < args.len) {
+                options.lacp_rate = netlink_bond.LacpRate.fromString(args[i + 1]) orelse {
+                    try stdout.print("Invalid LACP rate: {s}\n", .{args[i + 1]});
+                    try stdout.print("Valid rates: slow, fast\n", .{});
+                    return;
+                };
+                i += 1;
+            } else if (std.mem.eql(u8, args[i], "xmit_hash") and i + 1 < args.len) {
+                options.xmit_hash_policy = netlink_bond.XmitHashPolicy.fromString(args[i + 1]) orelse {
+                    try stdout.print("Invalid xmit_hash policy: {s}\n", .{args[i + 1]});
+                    try stdout.print("Valid policies: layer2, layer3+4, layer2+3, encap2+3, encap3+4, vlan+srcmac\n", .{});
+                    return;
+                };
+                i += 1;
+            } else if (std.mem.eql(u8, args[i], "ad_select") and i + 1 < args.len) {
+                options.ad_select = netlink_bond.AdSelect.fromString(args[i + 1]) orelse {
+                    try stdout.print("Invalid ad_select: {s}\n", .{args[i + 1]});
+                    try stdout.print("Valid options: stable, bandwidth, count\n", .{});
+                    return;
+                };
+                i += 1;
+            } else if (std.mem.eql(u8, args[i], "miimon") and i + 1 < args.len) {
+                options.miimon = std.fmt.parseInt(u32, args[i + 1], 10) catch {
+                    try stdout.print("Invalid miimon value: {s}\n", .{args[i + 1]});
                     return;
                 };
                 i += 1;
             }
         }
 
-        netlink_bond.createBond(bond_name, mode) catch |err| {
+        netlink_bond.createBondWithOptions(bond_name, options) catch |err| {
             try stdout.print("Failed to create bond: {}\n", .{err});
             return;
         };
-        try stdout.print("Bond {s} created with mode {s}\n", .{ bond_name, mode.toString() });
+
+        // Build status message
+        try stdout.print("Bond {s} created with mode {s}", .{ bond_name, options.mode.toString() });
+        if (options.lacp_rate) |rate| {
+            try stdout.print(", lacp_rate={s}", .{rate.toString()});
+        }
+        if (options.xmit_hash_policy) |policy| {
+            try stdout.print(", xmit_hash={s}", .{policy.toString()});
+        }
+        if (options.ad_select) |sel| {
+            try stdout.print(", ad_select={s}", .{sel.toString()});
+        }
+        try stdout.print("\n", .{});
         return;
     }
 

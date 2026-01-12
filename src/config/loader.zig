@@ -277,20 +277,44 @@ pub fn applyConfig(path: []const u8, allocator: std.mem.Allocator, options: Appl
     defer pre_report.deinit();
 
     if (pre_report.hasErrors()) {
-        try stdout.print("FAILED\n\n", .{});
-        try pre_report.format(stdout);
-        return ApplyResult{
-            .success = false,
-            .applied = 0,
-            .failed = pre_report.errors,
-            .skipped = 0,
-            .message = "Pre-apply validation found errors",
-        };
+        if (options.force) {
+            // Force mode: log errors but continue
+            try stdout.print("ERRORS ({d})\n\n", .{pre_report.errors});
+            try pre_report.format(stdout);
+            try stdout.print("--force: Continuing despite errors\n\n", .{});
+        } else {
+            try stdout.print("FAILED\n\n", .{});
+            try pre_report.format(stdout);
+            return ApplyResult{
+                .success = false,
+                .applied = 0,
+                .failed = pre_report.errors,
+                .skipped = 0,
+                .message = "Pre-apply validation found errors",
+            };
+        }
     }
 
     if (pre_report.hasWarnings()) {
-        try stdout.print("OK ({d} warnings)\n", .{pre_report.warnings});
-        try pre_report.format(stdout);
+        if (options.strict) {
+            // Strict mode: treat warnings as errors
+            try stdout.print("WARNINGS ({d})\n\n", .{pre_report.warnings});
+            try pre_report.format(stdout);
+            try stdout.print("--strict: Failing due to warnings\n", .{});
+            return ApplyResult{
+                .success = false,
+                .applied = 0,
+                .failed = pre_report.warnings,
+                .skipped = 0,
+                .message = "Strict mode: warnings treated as errors",
+            };
+        } else if (options.staging) {
+            // Staging mode: log warnings silently
+            try stdout.print("OK ({d} warnings - staging mode)\n", .{pre_report.warnings});
+        } else {
+            try stdout.print("OK ({d} warnings)\n", .{pre_report.warnings});
+            try pre_report.format(stdout);
+        }
     } else {
         try stdout.print("OK\n", .{});
     }
@@ -459,7 +483,9 @@ pub const ApplyResult = struct {
 pub const ApplyOptions = struct {
     dry_run: bool = false,
     skip_confirmation: bool = false,
-    force: bool = false,
+    force: bool = false, // Skip even errors
+    strict: bool = false, // Fail on warnings too
+    staging: bool = false, // Relaxed validation for staging environments
     verbose: bool = false,
 };
 

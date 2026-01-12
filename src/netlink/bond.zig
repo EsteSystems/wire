@@ -37,6 +37,89 @@ pub const BondMode = enum(u8) {
     }
 };
 
+/// LACP rate (for 802.3ad mode)
+pub const LacpRate = enum(u8) {
+    slow = 0, // 30 second interval
+    fast = 1, // 1 second interval
+
+    pub fn fromString(str: []const u8) ?LacpRate {
+        if (std.mem.eql(u8, str, "slow") or std.mem.eql(u8, str, "0")) return .slow;
+        if (std.mem.eql(u8, str, "fast") or std.mem.eql(u8, str, "1")) return .fast;
+        return null;
+    }
+
+    pub fn toString(self: LacpRate) []const u8 {
+        return switch (self) {
+            .slow => "slow",
+            .fast => "fast",
+        };
+    }
+};
+
+/// Transmit hash policy (for load balancing modes)
+pub const XmitHashPolicy = enum(u8) {
+    layer2 = 0, // Uses XOR of MAC addresses
+    layer3_4 = 1, // Uses upper layer (IP + port) info
+    layer2_3 = 2, // Uses XOR of MAC + IP addresses
+    encap2_3 = 3, // Uses encapsulated layer 2+3
+    encap3_4 = 4, // Uses encapsulated layer 3+4
+    vlan_srcmac = 5, // Uses VLAN + source MAC
+
+    pub fn fromString(str: []const u8) ?XmitHashPolicy {
+        if (std.mem.eql(u8, str, "layer2") or std.mem.eql(u8, str, "0")) return .layer2;
+        if (std.mem.eql(u8, str, "layer3+4") or std.mem.eql(u8, str, "1")) return .layer3_4;
+        if (std.mem.eql(u8, str, "layer2+3") or std.mem.eql(u8, str, "2")) return .layer2_3;
+        if (std.mem.eql(u8, str, "encap2+3") or std.mem.eql(u8, str, "3")) return .encap2_3;
+        if (std.mem.eql(u8, str, "encap3+4") or std.mem.eql(u8, str, "4")) return .encap3_4;
+        if (std.mem.eql(u8, str, "vlan+srcmac") or std.mem.eql(u8, str, "5")) return .vlan_srcmac;
+        return null;
+    }
+
+    pub fn toString(self: XmitHashPolicy) []const u8 {
+        return switch (self) {
+            .layer2 => "layer2",
+            .layer3_4 => "layer3+4",
+            .layer2_3 => "layer2+3",
+            .encap2_3 => "encap2+3",
+            .encap3_4 => "encap3+4",
+            .vlan_srcmac => "vlan+srcmac",
+        };
+    }
+};
+
+/// Aggregator selection logic (for 802.3ad mode)
+pub const AdSelect = enum(u8) {
+    stable = 0, // Default, don't reselect unless partner changes
+    bandwidth = 1, // Select based on total bandwidth
+    count = 2, // Select based on number of ports
+
+    pub fn fromString(str: []const u8) ?AdSelect {
+        if (std.mem.eql(u8, str, "stable") or std.mem.eql(u8, str, "0")) return .stable;
+        if (std.mem.eql(u8, str, "bandwidth") or std.mem.eql(u8, str, "1")) return .bandwidth;
+        if (std.mem.eql(u8, str, "count") or std.mem.eql(u8, str, "2")) return .count;
+        return null;
+    }
+
+    pub fn toString(self: AdSelect) []const u8 {
+        return switch (self) {
+            .stable => "stable",
+            .bandwidth => "bandwidth",
+            .count => "count",
+        };
+    }
+};
+
+/// Bond creation options
+pub const BondOptions = struct {
+    mode: BondMode = .balance_rr,
+    miimon: u32 = 100, // MII monitoring interval (ms)
+    updelay: u32 = 0, // Delay before enabling slave (ms)
+    downdelay: u32 = 0, // Delay before disabling slave (ms)
+    lacp_rate: ?LacpRate = null, // Only for 802.3ad
+    xmit_hash_policy: ?XmitHashPolicy = null, // For modes that do load balancing
+    ad_select: ?AdSelect = null, // Only for 802.3ad
+};
+
 /// Bond information
 pub const Bond = struct {
     name: [16]u8,
@@ -58,8 +141,8 @@ pub const Bond = struct {
     }
 };
 
-/// Create a bond interface
-pub fn createBond(name: []const u8, mode: BondMode) !void {
+/// Create a bond interface with options
+pub fn createBondWithOptions(name: []const u8, options: BondOptions) !void {
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
@@ -87,10 +170,33 @@ pub fn createBond(name: []const u8, mode: BondMode) !void {
     const data_start = try builder.startNestedAttr(socket.IFLA_INFO.DATA);
 
     // Bond mode
-    try builder.addAttrU8(socket.IFLA_BOND.MODE, @intFromEnum(mode));
+    try builder.addAttrU8(socket.IFLA_BOND.MODE, @intFromEnum(options.mode));
 
-    // Default MII monitoring interval (100ms)
-    try builder.addAttrU32(socket.IFLA_BOND.MIIMON, 100);
+    // MII monitoring interval
+    try builder.addAttrU32(socket.IFLA_BOND.MIIMON, options.miimon);
+
+    // Up/down delays
+    if (options.updelay > 0) {
+        try builder.addAttrU32(socket.IFLA_BOND.UPDELAY, options.updelay);
+    }
+    if (options.downdelay > 0) {
+        try builder.addAttrU32(socket.IFLA_BOND.DOWNDELAY, options.downdelay);
+    }
+
+    // LACP rate (only for 802.3ad mode)
+    if (options.lacp_rate) |rate| {
+        try builder.addAttrU8(socket.IFLA_BOND.AD_LACP_RATE, @intFromEnum(rate));
+    }
+
+    // Transmit hash policy (for load-balancing modes)
+    if (options.xmit_hash_policy) |policy| {
+        try builder.addAttrU8(socket.IFLA_BOND.XMIT_HASH_POLICY, @intFromEnum(policy));
+    }
+
+    // Aggregator selection (only for 802.3ad mode)
+    if (options.ad_select) |sel| {
+        try builder.addAttrU8(socket.IFLA_BOND.AD_SELECT, @intFromEnum(sel));
+    }
 
     builder.endNestedAttr(data_start);
     builder.endNestedAttr(linkinfo_start);
@@ -98,6 +204,11 @@ pub fn createBond(name: []const u8, mode: BondMode) !void {
     const msg = builder.finalize(hdr);
     const response = try nl.request(msg, allocator);
     allocator.free(response);
+}
+
+/// Create a bond interface (simple version)
+pub fn createBond(name: []const u8, mode: BondMode) !void {
+    return createBondWithOptions(name, .{ .mode = mode });
 }
 
 /// Delete a bond interface
