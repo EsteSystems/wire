@@ -247,6 +247,47 @@ pub fn moveInterfaceToPid(if_index: i32, pid: i32) !void {
     allocator.free(response);
 }
 
+/// Search PATH for an executable and return the full path
+fn findInPath(allocator: std.mem.Allocator, cmd: []const u8) ?[:0]const u8 {
+    // If command contains a slash, it's already a path
+    for (cmd) |c| {
+        if (c == '/') {
+            return allocator.dupeZ(u8, cmd) catch return null;
+        }
+    }
+
+    // Get PATH from environment
+    const path_env = std.posix.getenv("PATH") orelse "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+
+    // Search each directory in PATH
+    var path_iter = std.mem.splitScalar(u8, path_env, ':');
+    while (path_iter.next()) |dir| {
+        if (dir.len == 0) continue;
+
+        // Build full path: dir/cmd
+        const full_path = std.fmt.allocPrintZ(allocator, "{s}/{s}", .{ dir, cmd }) catch continue;
+
+        // Check if file exists and is executable
+        const stat = std.posix.fstatat(std.posix.AT.FDCWD, full_path, 0) catch {
+            allocator.free(full_path);
+            continue;
+        };
+
+        // Check if it's a regular file (not directory) and has execute permission
+        const is_regular = (stat.mode & std.posix.S.IFMT) == std.posix.S.IFREG;
+        const is_executable = (stat.mode & std.posix.S.IXUSR) != 0 or
+            (stat.mode & std.posix.S.IXGRP) != 0 or
+            (stat.mode & std.posix.S.IXOTH) != 0;
+
+        if (is_regular and is_executable) {
+            return full_path;
+        }
+        allocator.free(full_path);
+    }
+
+    return null;
+}
+
 /// Execute a command in a namespace
 pub fn execInNamespace(allocator: std.mem.Allocator, ns_name: []const u8, argv: []const []const u8) !std.process.Child.Term {
     // We need to fork, enter namespace, then exec
@@ -259,13 +300,23 @@ pub fn execInNamespace(allocator: std.mem.Allocator, ns_name: []const u8, argv: 
             linux.exit(126);
         };
 
+        // Find the command in PATH
+        const cmd_path = findInPath(allocator, argv[0]) orelse {
+            // Command not found
+            linux.exit(127);
+        };
+
         // Build null-terminated argv
         var args = allocator.alloc(?[*:0]const u8, argv.len + 1) catch {
             linux.exit(127);
         };
         defer allocator.free(args);
 
-        for (argv, 0..) |arg, i| {
+        // First arg is the resolved path
+        args[0] = cmd_path;
+
+        // Copy remaining args
+        for (argv[1..], 1..) |arg, i| {
             args[i] = allocator.dupeZ(u8, arg) catch {
                 linux.exit(127);
             };
@@ -274,7 +325,7 @@ pub fn execInNamespace(allocator: std.mem.Allocator, ns_name: []const u8, argv: 
 
         // Exec
         const err = linux.execve(
-            args[0].?,
+            cmd_path,
             @ptrCast(args.ptr),
             @ptrCast(std.os.environ.ptr),
         );

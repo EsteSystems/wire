@@ -106,10 +106,12 @@ complete -c wire -n "__fish_wire_using_subcommand rule add" -a "from to fwmark t
 
 # netns subcommands
 complete -c wire -n "__fish_wire_using_command netns" -a "list show add create del delete exec set help" -d "Action"
-complete -c wire -n "__fish_wire_using_subcommand netns exec" -a "(__fish_wire_namespaces)" -d "Namespace"
+complete -c wire -n "__fish_wire_using_subcommand netns exec && test (count (commandline -opc)) -eq 3" -a "(__fish_wire_namespaces)" -d "Namespace"
+complete -c wire -n "__fish_wire_using_subcommand netns exec && test (count (commandline -opc)) -eq 4" -a "wire ip ss ping iptables nft bash sh" -d "Command"
 complete -c wire -n "__fish_wire_using_subcommand netns del" -a "(__fish_wire_namespaces)" -d "Namespace"
 complete -c wire -n "__fish_wire_using_subcommand netns delete" -a "(__fish_wire_namespaces)" -d "Namespace"
-complete -c wire -n "__fish_wire_using_subcommand netns set" -a "(__fish_wire_namespaces)" -d "Namespace"
+complete -c wire -n "__fish_wire_using_subcommand netns set && test (count (commandline -opc)) -eq 3" -a "(__fish_wire_interfaces)" -d "Interface"
+complete -c wire -n "__fish_wire_using_subcommand netns set && test (count (commandline -opc)) -eq 4" -a "(__fish_wire_namespaces)" -d "Namespace"
 
 # tc subcommands
 complete -c wire -n "__fish_wire_using_command tc" -a "(__fish_wire_interfaces) help" -d "Interface"

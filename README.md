@@ -67,8 +67,59 @@ wire vlan 100 on eth0                   # Create eth0.100
 ```bash
 wire veth veth0 peer veth1              # Create veth pair
 wire veth veth0 show                    # Show peer info
-wire veth veth0 netns pid 12345         # Move to namespace
 wire veth veth0 delete                  # Delete pair
+```
+
+#### Network Namespaces
+
+```bash
+wire netns                              # List namespaces
+wire netns add isolated                 # Create namespace
+wire netns set veth1 isolated           # Move interface to namespace
+wire netns exec isolated ip addr        # Execute command in namespace
+wire netns exec isolated wire interface # Run wire in namespace
+wire netns del isolated                 # Delete namespace
+```
+
+#### IP Policy Routing (Rules)
+
+```bash
+wire rule                               # Show all rules
+wire rule add from 10.0.0.0/24 table 100 prio 1000
+wire rule add to 192.168.0.0/16 table 200
+wire rule add fwmark 1 table 100
+wire rule del 1000                      # Delete by priority
+```
+
+#### Traffic Control (QoS)
+
+```bash
+wire tc eth0                            # Show qdiscs
+wire tc eth0 add fq_codel               # Fair queuing with CoDel
+wire tc eth0 add tbf rate 100mbit burst 32k
+wire tc eth0 add pfifo limit 1000
+wire tc eth0 del                        # Remove qdisc
+```
+
+#### Hardware Tuning (ethtool)
+
+```bash
+wire hw eth0 show                       # Driver info, ring, coalesce
+wire hw eth0 ring                       # Ring buffer parameters
+wire hw eth0 ring set rx 4096 tx 4096   # Set ring sizes
+wire hw eth0 coalesce                   # Interrupt coalescing
+wire hw eth0 coalesce set rx 100 tx 100 # Set coalesce (usecs)
+```
+
+#### Tunnels (VXLAN, GRE)
+
+```bash
+wire tunnel vxlan vx0 vni 100 local 10.0.0.1
+wire tunnel vxlan vx0 vni 100 local 10.0.0.1 group 239.1.1.1
+wire tunnel gre gre1 local 10.0.0.1 remote 10.0.0.2
+wire tunnel gre gre1 local 10.0.0.1 remote 10.0.0.2 key 12345
+wire tunnel gretap gretap1 local 10.0.0.1 remote 10.0.0.2
+wire tunnel delete vx0                  # Delete tunnel
 ```
 
 #### Diagnostics & Troubleshooting
@@ -217,6 +268,7 @@ Press Ctrl+C to stop
 - **v0.3** - Daemon mode with drift detection ✓
 - **v0.4** - Validation, hints, and analysis ✓
 - **v0.5** - Diagnostics and topology-aware troubleshooting ✓
+- **v0.6** - Advanced networking (namespaces, rules, tc, tunnels, ethtool) ✓
 - **v1.0** - Production ready
 
 ## Requirements

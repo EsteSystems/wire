@@ -95,9 +95,25 @@ _wire_completions() {
         netns|namespace)
             if [[ $cword -eq 2 ]]; then
                 COMPREPLY=($(compgen -W "list show add create del delete exec set help" -- "$cur"))
-            elif [[ "${COMP_WORDS[2]}" == "exec" || "${COMP_WORDS[2]}" == "del" || "${COMP_WORDS[2]}" == "delete" || "${COMP_WORDS[2]}" == "set" ]]; then
-                local namespaces=$(ls /var/run/netns 2>/dev/null)
-                COMPREPLY=($(compgen -W "$namespaces" -- "$cur"))
+            elif [[ "${COMP_WORDS[2]}" == "exec" ]]; then
+                if [[ $cword -eq 3 ]]; then
+                    local namespaces=$(ls /var/run/netns 2>/dev/null)
+                    COMPREPLY=($(compgen -W "$namespaces" -- "$cur"))
+                elif [[ $cword -eq 4 ]]; then
+                    # Suggest common commands to run in namespace
+                    COMPREPLY=($(compgen -W "wire ip ss ping iptables nft bash sh" -- "$cur"))
+                fi
+            elif [[ "${COMP_WORDS[2]}" == "del" || "${COMP_WORDS[2]}" == "delete" || "${COMP_WORDS[2]}" == "set" ]]; then
+                if [[ $cword -eq 3 ]]; then
+                    local namespaces=$(ls /var/run/netns 2>/dev/null)
+                    COMPREPLY=($(compgen -W "$namespaces" -- "$cur"))
+                elif [[ "${COMP_WORDS[2]}" == "set" && $cword -eq 4 ]]; then
+                    local namespaces=$(ls /var/run/netns 2>/dev/null)
+                    COMPREPLY=($(compgen -W "$namespaces" -- "$cur"))
+                fi
+            elif [[ "${COMP_WORDS[2]}" == "add" || "${COMP_WORDS[2]}" == "create" ]]; then
+                # No completion for new namespace name
+                COMPREPLY=()
             fi
             ;;
         tc|qdisc)
