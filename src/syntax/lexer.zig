@@ -48,6 +48,7 @@ pub const TokenType = enum {
     PIPE, // |
     COMMENT, // # comment
     NEWLINE,
+    INDENT, // Indentation at start of line (for block format)
     EOF,
 
     // Keywords
@@ -76,6 +77,7 @@ pub const Lexer = struct {
     line: usize,
     column: usize,
     line_start: usize,
+    at_line_start: bool, // Track if we're at the start of a line (for indent detection)
 
     const Self = @This();
 
@@ -135,11 +137,32 @@ pub const Lexer = struct {
             .line = 1,
             .column = 1,
             .line_start = 0,
+            .at_line_start = true,
         };
     }
 
     /// Get the next token
     pub fn nextToken(self: *Self) Token {
+        // Check for indentation at start of line (for block format support)
+        if (self.at_line_start and !self.isAtEnd()) {
+            const c = self.peek();
+            if (c == ' ' or c == '\t') {
+                // Consume all leading whitespace
+                self.start = self.current;
+                while (!self.isAtEnd()) {
+                    const ws = self.peek();
+                    if (ws == ' ' or ws == '\t') {
+                        _ = self.advance();
+                    } else {
+                        break;
+                    }
+                }
+                self.at_line_start = false;
+                return self.makeToken(.INDENT);
+            }
+            self.at_line_start = false;
+        }
+
         self.skipWhitespace();
         self.start = self.current;
 
@@ -165,6 +188,7 @@ pub const Lexer = struct {
             self.line += 1;
             self.line_start = self.current;
             self.column = 1;
+            self.at_line_start = true; // Next token check for indent
             return token;
         }
 

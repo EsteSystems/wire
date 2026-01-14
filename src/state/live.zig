@@ -61,6 +61,23 @@ fn queryInterfaces(state: *types.NetworkState) !void {
             @memcpy(veth_state.name[0..name.len], name);
             try state.veths.append(veth_state);
         }
+
+        // If this is a VLAN interface, add to vlans list
+        if (iface.getLinkKind()) |kind| {
+            if (std.mem.eql(u8, kind, "vlan")) {
+                if (iface.link_index) |parent_idx| {
+                    var vlan_state = types.VlanState{
+                        .name = undefined,
+                        .name_len = name.len,
+                        .index = iface.index,
+                        .parent_index = parent_idx,
+                        .vlan_id = iface.vlan_id orelse 0,
+                    };
+                    @memcpy(vlan_state.name[0..name.len], name);
+                    try state.vlans.append(vlan_state);
+                }
+            }
+        }
     }
 }
 
@@ -183,6 +200,8 @@ pub fn refreshState(state: *types.NetworkState, target: RefreshTarget) !void {
     switch (target) {
         .interfaces => {
             state.interfaces.clearRetainingCapacity();
+            state.veths.clearRetainingCapacity();
+            state.vlans.clearRetainingCapacity();
             try queryInterfaces(state);
         },
         .addresses => {
@@ -197,6 +216,8 @@ pub fn refreshState(state: *types.NetworkState, target: RefreshTarget) !void {
             state.interfaces.clearRetainingCapacity();
             state.addresses.clearRetainingCapacity();
             state.routes.clearRetainingCapacity();
+            state.veths.clearRetainingCapacity();
+            state.vlans.clearRetainingCapacity();
             try queryInterfaces(state);
             try queryAddresses(state);
             try queryRoutes(state);

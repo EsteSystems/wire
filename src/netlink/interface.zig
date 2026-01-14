@@ -18,6 +18,7 @@ pub const Interface = struct {
     link_netns_id: ?i32, // IFLA_LINK_NETNSID - namespace of peer (for veth)
     link_kind: [16]u8, // IFLA_INFO_KIND - "veth", "bridge", "bond", etc.
     link_kind_len: usize,
+    vlan_id: ?u16, // VLAN ID (from IFLA_VLAN_ID in INFO_DATA)
 
     pub fn getName(self: *const Interface) []const u8 {
         return self.name[0..self.name_len];
@@ -124,6 +125,7 @@ pub fn getInterfaces(allocator: std.mem.Allocator) ![]Interface {
                     .link_netns_id = null,
                     .link_kind = undefined,
                     .link_kind_len = 0,
+                    .vlan_id = null,
                 };
                 @memset(&iface.name, 0);
                 @memset(&iface.mac, 0);
@@ -187,7 +189,8 @@ pub fn getInterfaces(allocator: std.mem.Allocator) ![]Interface {
                                 }
                             },
                             socket.IFLA.LINKINFO => {
-                                // Parse nested LINKINFO attributes to get KIND
+                                // Parse nested LINKINFO attributes to get KIND and DATA
+                                var info_data: ?[]const u8 = null;
                                 var nested_parser = socket.AttrParser.init(attr.value);
                                 while (nested_parser.next()) |nested_attr| {
                                     if (nested_attr.attr_type == socket.IFLA_INFO.KIND) {
@@ -195,7 +198,22 @@ pub fn getInterfaces(allocator: std.mem.Allocator) ![]Interface {
                                         const copy_len = @min(kind_end, iface.link_kind.len);
                                         @memcpy(iface.link_kind[0..copy_len], nested_attr.value[0..copy_len]);
                                         iface.link_kind_len = copy_len;
-                                        break;
+                                    } else if (nested_attr.attr_type == socket.IFLA_INFO.DATA) {
+                                        info_data = nested_attr.value;
+                                    }
+                                }
+                                // If this is a VLAN, parse INFO_DATA for VLAN ID
+                                if (iface.link_kind_len >= 4 and std.mem.eql(u8, iface.link_kind[0..4], "vlan")) {
+                                    if (info_data) |data| {
+                                        var vlan_parser = socket.AttrParser.init(data);
+                                        while (vlan_parser.next()) |vlan_attr| {
+                                            if (vlan_attr.attr_type == socket.IFLA_VLAN.ID) {
+                                                if (vlan_attr.value.len >= 2) {
+                                                    iface.vlan_id = std.mem.readInt(u16, vlan_attr.value[0..2], .little);
+                                                }
+                                                break;
+                                            }
+                                        }
                                     }
                                 }
                             },

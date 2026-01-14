@@ -170,6 +170,11 @@ pub const Parser = struct {
     }
 
     /// Parse multiple commands (for config files)
+    /// Supports both command format and block format:
+    ///   Command format: interface eth0 set state up
+    ///   Block format:   interface eth0
+    ///                     state up
+    ///                     address 10.0.0.1/24
     pub fn parseCommands(self: *Self) ParseError![]Command {
         var commands = std.ArrayList(Command).init(self.allocator);
         errdefer {
@@ -196,8 +201,54 @@ pub const Parser = struct {
                 continue;
             }
 
-            const cmd = try self.parseCommand();
-            try commands.append(cmd);
+            // Check for block format: subject name followed by newline+indent
+            if (self.check(.INTERFACE)) {
+                // Parse interface subject
+                _ = self.advance();
+                const name = if (!self.isAtEnd() and self.check(.IDENTIFIER))
+                    self.advance().lexeme
+                else
+                    null;
+
+                // Check if this is block format (newline followed by indent)
+                if (name != null and self.check(.NEWLINE)) {
+                    const saved_pos = self.current;
+                    _ = self.advance(); // consume newline
+
+                    if (self.check(.INDENT)) {
+                        // Block format - parse indented sub-commands
+                        try self.parseBlockCommands(&commands, name.?);
+                        continue;
+                    } else {
+                        // Not block format, restore position and parse normally
+                        self.current = saved_pos;
+                    }
+                }
+
+                // Regular command format - continue parsing action
+                const action = self.parseAction() catch Action{ .none = {} };
+
+                var attrs = std.ArrayList(Attribute).init(self.allocator);
+                errdefer attrs.deinit();
+
+                while (!self.isAtEnd() and !self.check(.NEWLINE) and !self.check(.PIPE) and !self.check(.EOF)) {
+                    if (try self.parseAttribute()) |attr| {
+                        try attrs.append(attr);
+                    } else {
+                        break;
+                    }
+                }
+
+                try commands.append(Command{
+                    .subject = Subject{ .interface = .{ .name = name } },
+                    .action = action,
+                    .attributes = try attrs.toOwnedSlice(),
+                });
+            } else {
+                // Parse other command types normally
+                const cmd = try self.parseCommand();
+                try commands.append(cmd);
+            }
 
             // Skip trailing newline/pipe
             if (self.check(.NEWLINE) or self.check(.PIPE)) {
@@ -206,6 +257,111 @@ pub const Parser = struct {
         }
 
         return commands.toOwnedSlice();
+    }
+
+    /// Parse block format sub-commands for an interface
+    fn parseBlockCommands(self: *Self, commands: *std.ArrayList(Command), interface_name: []const u8) ParseError!void {
+        while (!self.isAtEnd()) {
+            // Skip empty lines
+            if (self.check(.NEWLINE)) {
+                _ = self.advance();
+                continue;
+            }
+
+            // Skip comments on indented lines
+            if (self.check(.COMMENT)) {
+                _ = self.advance();
+                continue;
+            }
+
+            // Check for indent - if no indent, we're done with block
+            if (!self.check(.INDENT)) {
+                break;
+            }
+
+            _ = self.advance(); // consume INDENT
+
+            // Skip comments after indent
+            if (self.check(.COMMENT)) {
+                _ = self.advance();
+                continue;
+            }
+
+            // Skip if we hit newline immediately (blank indented line)
+            if (self.check(.NEWLINE) or self.isAtEnd()) {
+                continue;
+            }
+
+            // Parse the sub-command: state, address, mtu, etc.
+            const token = self.peek();
+
+            switch (token.type) {
+                .STATE => {
+                    // state up/down → set state up/down
+                    _ = self.advance();
+                    if (self.isAtEnd()) return ParseError.MissingValue;
+                    const value = self.advance().lexeme;
+                    try commands.append(Command{
+                        .subject = Subject{ .interface = .{ .name = interface_name } },
+                        .action = Action{ .set = .{ .attr = "state", .value = value } },
+                        .attributes = &[_]Attribute{},
+                    });
+                },
+                .ADDRESS => {
+                    // address 10.0.0.1/24 → address 10.0.0.1/24
+                    _ = self.advance();
+                    var value: ?[]const u8 = null;
+                    if (!self.isAtEnd() and self.check(.IP_ADDRESS)) {
+                        value = self.advance().lexeme;
+                    }
+                    try commands.append(Command{
+                        .subject = Subject{ .interface = .{ .name = interface_name } },
+                        .action = Action{ .add = .{ .value = value } },
+                        .attributes = &[_]Attribute{},
+                    });
+                },
+                .MTU => {
+                    // mtu 9000 → set mtu 9000
+                    _ = self.advance();
+                    if (self.isAtEnd()) return ParseError.MissingValue;
+                    const value = self.advance().lexeme;
+                    try commands.append(Command{
+                        .subject = Subject{ .interface = .{ .name = interface_name } },
+                        .action = Action{ .set = .{ .attr = "mtu", .value = value } },
+                        .attributes = &[_]Attribute{},
+                    });
+                },
+                .UP => {
+                    // up → set state up (shorthand)
+                    _ = self.advance();
+                    try commands.append(Command{
+                        .subject = Subject{ .interface = .{ .name = interface_name } },
+                        .action = Action{ .set = .{ .attr = "state", .value = "up" } },
+                        .attributes = &[_]Attribute{},
+                    });
+                },
+                .DOWN => {
+                    // down → set state down (shorthand)
+                    _ = self.advance();
+                    try commands.append(Command{
+                        .subject = Subject{ .interface = .{ .name = interface_name } },
+                        .action = Action{ .set = .{ .attr = "state", .value = "down" } },
+                        .attributes = &[_]Attribute{},
+                    });
+                },
+                else => {
+                    // Unknown sub-command in block, skip to next line
+                    while (!self.isAtEnd() and !self.check(.NEWLINE)) {
+                        _ = self.advance();
+                    }
+                },
+            }
+
+            // Skip trailing newline
+            if (self.check(.NEWLINE)) {
+                _ = self.advance();
+            }
+        }
     }
 
     // Subject parsing
@@ -596,4 +752,52 @@ test "parse config file" {
     try std.testing.expect(commands[1].subject == .interface);
     try std.testing.expect(commands[1].action == .add);
     try std.testing.expect(commands[2].subject == .route);
+}
+
+test "parse block format config" {
+    const allocator = std.testing.allocator;
+    const config =
+        \\interface eth0
+        \\  state up
+        \\  address 10.0.0.1/24
+        \\  mtu 9000
+        \\interface eth1
+        \\  state up
+    ;
+
+    const commands = try parseConfig(config, allocator);
+    defer {
+        for (commands) |*cmd| {
+            var c = cmd.*;
+            c.deinit(allocator);
+        }
+        allocator.free(commands);
+    }
+
+    try std.testing.expect(commands.len == 5);
+
+    // interface eth0 set state up
+    try std.testing.expect(commands[0].subject == .interface);
+    try std.testing.expectEqualStrings("eth0", commands[0].subject.interface.name.?);
+    try std.testing.expect(commands[0].action == .set);
+    try std.testing.expectEqualStrings("state", commands[0].action.set.attr);
+    try std.testing.expectEqualStrings("up", commands[0].action.set.value);
+
+    // interface eth0 address 10.0.0.1/24
+    try std.testing.expect(commands[1].subject == .interface);
+    try std.testing.expectEqualStrings("eth0", commands[1].subject.interface.name.?);
+    try std.testing.expect(commands[1].action == .add);
+    try std.testing.expectEqualStrings("10.0.0.1/24", commands[1].action.add.value.?);
+
+    // interface eth0 set mtu 9000
+    try std.testing.expect(commands[2].subject == .interface);
+    try std.testing.expectEqualStrings("eth0", commands[2].subject.interface.name.?);
+    try std.testing.expect(commands[2].action == .set);
+    try std.testing.expectEqualStrings("mtu", commands[2].action.set.attr);
+    try std.testing.expectEqualStrings("9000", commands[2].action.set.value);
+
+    // interface eth1 set state up
+    try std.testing.expect(commands[3].subject == .interface);
+    try std.testing.expectEqualStrings("eth1", commands[3].subject.interface.name.?);
+    try std.testing.expect(commands[3].action == .set);
 }
