@@ -180,6 +180,26 @@ wire diff config.wire                   # Compare to live state
 wire state                              # Export current state
 ```
 
+Configuration files support two formats:
+
+**Command format** (one command per line):
+```
+interface eth0 set state up
+interface eth0 address 10.0.0.1/24
+interface eth0 set mtu 9000
+```
+
+**Block format** (indented attributes):
+```
+interface eth0
+  state up
+  address 10.0.0.1/24
+  mtu 9000
+
+interface eth1
+  state up
+```
+
 ### Example Output
 
 ```
