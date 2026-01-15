@@ -80,6 +80,8 @@ pub const Executor = struct {
             .bridge => |bridge| try self.executeBridge(bridge, cmd.action, cmd.attributes),
             .vlan => |vlan| try self.executeVlan(vlan, cmd.action, cmd.attributes),
             .veth => |veth| try self.executeVeth(veth, cmd.action),
+            .tc => try self.executeTc(cmd),
+            .tunnel => try self.executeTunnel(cmd),
         }
     }
 
@@ -631,6 +633,31 @@ pub const Executor = struct {
         }}) catch {};
 
         self.stdout.print("\n", .{}) catch {};
+    }
+
+    // TC commands - delegate to main CLI handler for now
+    fn executeTc(self: *Self, cmd: *const Command) ExecuteError!void {
+        const tc = cmd.subject.tc;
+        self.stdout.print("TC command: interface={s} type={s} kind={s}\n", .{
+            tc.interface orelse "(none)",
+            tc.tc_type orelse "(none)",
+            tc.tc_kind orelse "(none)",
+        }) catch {};
+        self.stdout.print("Note: TC commands in config files run via 'wire tc' CLI\n", .{}) catch {};
+        // TC commands are complex and require main.zig handleTc for full execution
+        // Config file tc commands are parsed for validation but executed via CLI
+    }
+
+    // Tunnel commands - delegate to main CLI handler for now
+    fn executeTunnel(self: *Self, cmd: *const Command) ExecuteError!void {
+        const tunnel = cmd.subject.tunnel;
+        self.stdout.print("Tunnel command: type={s} name={s}\n", .{
+            tunnel.tunnel_type orelse "(none)",
+            tunnel.name orelse "(none)",
+        }) catch {};
+        self.stdout.print("Note: Tunnel commands in config files run via 'wire tunnel' CLI\n", .{}) catch {};
+        // Tunnel commands are complex and require main.zig handleTunnel for full execution
+        // Config file tunnel commands are parsed for validation but executed via CLI
     }
 };
 

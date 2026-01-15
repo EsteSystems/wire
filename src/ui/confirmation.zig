@@ -170,6 +170,24 @@ pub const ConfirmationSystem = struct {
             .analyze => {
                 try self.stdout.print("analyze", .{});
             },
+            .tc => |tc| {
+                try self.stdout.print("tc", .{});
+                if (tc.interface) |iface| {
+                    try self.stdout.print(" {s}", .{iface});
+                }
+                if (tc.tc_type) |t| {
+                    try self.stdout.print(" {s}", .{t});
+                }
+            },
+            .tunnel => |tunnel| {
+                try self.stdout.print("tunnel", .{});
+                if (tunnel.tunnel_type) |t| {
+                    try self.stdout.print(" {s}", .{t});
+                }
+                if (tunnel.name) |name| {
+                    try self.stdout.print(" {s}", .{name});
+                }
+            },
         }
     }
 

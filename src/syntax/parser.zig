@@ -60,6 +60,16 @@ pub const Command = struct {
                     allocator.free(ports);
                 }
             },
+            .tc => |tc| {
+                if (tc.args) |args| {
+                    allocator.free(args);
+                }
+            },
+            .tunnel => |tunnel| {
+                if (tunnel.args) |args| {
+                    allocator.free(args);
+                }
+            },
             else => {},
         }
         allocator.free(self.attributes);
@@ -74,6 +84,8 @@ pub const Subject = union(enum) {
     bridge: BridgeSubject,
     vlan: VlanSubject,
     veth: VethSubject,
+    tc: TcSubject,
+    tunnel: TunnelSubject,
     analyze: void,
 };
 
@@ -105,6 +117,19 @@ pub const VlanSubject = struct {
 pub const VethSubject = struct {
     name: ?[]const u8,
     peer: ?[]const u8,
+};
+
+pub const TcSubject = struct {
+    interface: ?[]const u8,
+    tc_type: ?[]const u8, // qdisc, class, filter
+    tc_kind: ?[]const u8, // pfifo, fq_codel, tbf, htb for qdisc; u32, fw for filter
+    args: ?[]const u8, // Raw args string for complex parameters
+};
+
+pub const TunnelSubject = struct {
+    tunnel_type: ?[]const u8, // vxlan, gre, gretap, geneve, ipip, sit, wireguard
+    name: ?[]const u8,
+    args: ?[]const u8, // Raw args string for complex parameters
 };
 
 /// The action to perform
@@ -423,6 +448,121 @@ pub const Parser = struct {
 
                 try commands.append(Command{
                     .subject = Subject{ .vlan = .{ .id = id, .parent = parent, .name = vlan_name } },
+                    .action = action,
+                    .attributes = &[_]Attribute{},
+                });
+            } else if (self.check(.TC)) {
+                // Parse tc command: tc <interface> add <type> [options...]
+                //                or: tc <interface> class add <classid> rate <rate> ...
+                //                or: tc <interface> filter add <type> ...
+                _ = self.advance();
+
+                var interface: ?[]const u8 = null;
+                var tc_type: ?[]const u8 = null;
+                var tc_kind: ?[]const u8 = null;
+                var action = Action{ .none = {} };
+
+                // Parse interface name
+                if (!self.isAtEnd() and self.check(.IDENTIFIER)) {
+                    interface = self.advance().lexeme;
+                }
+
+                // Collect remaining tokens as args
+                var args_list = std.ArrayList(u8).init(self.allocator);
+                defer args_list.deinit();
+
+                while (!self.isAtEnd() and !self.check(.NEWLINE) and !self.check(.PIPE) and !self.check(.EOF)) {
+                    const token = self.advance();
+
+                    // Check for action keywords
+                    if (std.mem.eql(u8, token.lexeme, "add")) {
+                        action = Action{ .add = .{ .value = null } };
+                    } else if (std.mem.eql(u8, token.lexeme, "del") or std.mem.eql(u8, token.lexeme, "delete")) {
+                        action = Action{ .delete = {} };
+                    } else if (std.mem.eql(u8, token.lexeme, "class")) {
+                        tc_type = "class";
+                    } else if (std.mem.eql(u8, token.lexeme, "filter")) {
+                        tc_type = "filter";
+                    } else if (tc_kind == null and tc_type == null and
+                        (std.mem.eql(u8, token.lexeme, "pfifo") or
+                        std.mem.eql(u8, token.lexeme, "fq_codel") or
+                        std.mem.eql(u8, token.lexeme, "tbf") or
+                        std.mem.eql(u8, token.lexeme, "htb")))
+                    {
+                        tc_type = "qdisc";
+                        tc_kind = token.lexeme;
+                    } else {
+                        // Add to args
+                        if (args_list.items.len > 0) {
+                            try args_list.append(' ');
+                        }
+                        try args_list.appendSlice(token.lexeme);
+                    }
+                }
+
+                var args: ?[]const u8 = null;
+                if (args_list.items.len > 0) {
+                    args = try self.allocator.dupe(u8, args_list.items);
+                }
+
+                try commands.append(Command{
+                    .subject = Subject{ .tc = .{
+                        .interface = interface,
+                        .tc_type = tc_type,
+                        .tc_kind = tc_kind,
+                        .args = args,
+                    } },
+                    .action = action,
+                    .attributes = &[_]Attribute{},
+                });
+            } else if (self.check(.TUNNEL)) {
+                // Parse tunnel command: tunnel <type> <name> [options...]
+                _ = self.advance();
+
+                var tunnel_type: ?[]const u8 = null;
+                var name: ?[]const u8 = null;
+                var action = Action{ .create = {} };
+
+                // Parse tunnel type
+                if (!self.isAtEnd() and self.check(.IDENTIFIER)) {
+                    const ttype = self.advance().lexeme;
+                    if (std.mem.eql(u8, ttype, "delete") or std.mem.eql(u8, ttype, "del")) {
+                        action = Action{ .delete = {} };
+                        // Next token is the name
+                        if (!self.isAtEnd() and self.check(.IDENTIFIER)) {
+                            name = self.advance().lexeme;
+                        }
+                    } else {
+                        tunnel_type = ttype;
+                        // Next token is the name
+                        if (!self.isAtEnd() and self.check(.IDENTIFIER)) {
+                            name = self.advance().lexeme;
+                        }
+                    }
+                }
+
+                // Collect remaining tokens as args
+                var args_list = std.ArrayList(u8).init(self.allocator);
+                defer args_list.deinit();
+
+                while (!self.isAtEnd() and !self.check(.NEWLINE) and !self.check(.PIPE) and !self.check(.EOF)) {
+                    if (args_list.items.len > 0) {
+                        try args_list.append(' ');
+                    }
+                    try args_list.appendSlice(self.advance().lexeme);
+                }
+
+                var args: ?[]const u8 = null;
+                if (args_list.items.len > 0) {
+                    args = try self.allocator.dupe(u8, args_list.items);
+                }
+
+                try commands.append(Command{
+                    .subject = Subject{ .tunnel = .{
+                        .tunnel_type = tunnel_type,
+                        .name = name,
+                        .args = args,
+                    } },
                     .action = action,
                     .attributes = &[_]Attribute{},
                 });

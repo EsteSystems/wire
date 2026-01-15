@@ -11,6 +11,8 @@ pub const TokenType = enum {
     VETH,
     NAMESPACE,
     NEIGHBOR,
+    TC,
+    TUNNEL,
 
     // Verbs
     SHOW,
@@ -95,6 +97,8 @@ pub const Lexer = struct {
         .{ "veth", .VETH },
         .{ "namespace", .NAMESPACE },
         .{ "neighbor", .NEIGHBOR },
+        .{ "tc", .TC },
+        .{ "tunnel", .TUNNEL },
 
         // Verbs
         .{ "show", .SHOW },

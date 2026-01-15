@@ -83,6 +83,71 @@ pub const GreOptions = struct {
     pmtudisc: bool = true,
 };
 
+/// GENEVE attributes (nested in IFLA_INFO_DATA for type "geneve")
+pub const IFLA_GENEVE = struct {
+    pub const UNSPEC: u16 = 0;
+    pub const ID: u16 = 1; // VNI (24-bit)
+    pub const REMOTE: u16 = 2; // Remote IPv4 address
+    pub const TTL: u16 = 3;
+    pub const TOS: u16 = 4;
+    pub const PORT: u16 = 5; // UDP port (default 6081)
+    pub const COLLECT_METADATA: u16 = 6;
+    pub const REMOTE6: u16 = 7; // Remote IPv6 address
+    pub const UDP_CSUM: u16 = 8;
+    pub const UDP_ZERO_CSUM6_TX: u16 = 9;
+    pub const UDP_ZERO_CSUM6_RX: u16 = 10;
+    pub const LABEL: u16 = 11;
+    pub const DF: u16 = 12;
+};
+
+/// IP-in-IP tunnel attributes (nested in IFLA_INFO_DATA for type "ipip"/"sit")
+pub const IFLA_IPTUN = struct {
+    pub const UNSPEC: u16 = 0;
+    pub const LINK: u16 = 1;
+    pub const LOCAL: u16 = 2;
+    pub const REMOTE: u16 = 3;
+    pub const TTL: u16 = 4;
+    pub const TOS: u16 = 5;
+    pub const ENCAP_LIMIT: u16 = 6;
+    pub const FLOWINFO: u16 = 7;
+    pub const FLAGS: u16 = 8;
+    pub const PROTO: u16 = 9;
+    pub const PMTUDISC: u16 = 10;
+    pub const @"6RD_PREFIX": u16 = 11;
+    pub const @"6RD_RELAY_PREFIX": u16 = 12;
+    pub const @"6RD_PREFIXLEN": u16 = 13;
+    pub const @"6RD_RELAY_PREFIXLEN": u16 = 14;
+    pub const ENCAP_TYPE: u16 = 15;
+    pub const ENCAP_FLAGS: u16 = 16;
+    pub const ENCAP_SPORT: u16 = 17;
+    pub const ENCAP_DPORT: u16 = 18;
+    pub const COLLECT_METADATA: u16 = 19;
+    pub const FWMARK: u16 = 20;
+};
+
+/// WireGuard interface info (basic creation via rtnetlink)
+pub const IFLA_WG = struct {
+    // WireGuard uses generic netlink for peer/key config
+    // but interface creation can be done via rtnetlink
+    pub const UNSPEC: u16 = 0;
+};
+
+/// GENEVE creation options
+pub const GeneveOptions = struct {
+    vni: u32 = 100,
+    remote: ?[4]u8 = null,
+    port: u16 = 6081, // Default GENEVE port
+    ttl: u8 = 64,
+};
+
+/// IP-in-IP creation options
+pub const IpipOptions = struct {
+    local: [4]u8,
+    remote: [4]u8,
+    ttl: u8 = 64,
+    pmtudisc: bool = true,
+};
+
 /// Create a VXLAN interface
 pub fn createVxlan(name: []const u8, options: VxlanOptions) !void {
     var nl = try socket.NetlinkSocket.open();
@@ -249,6 +314,185 @@ pub fn createGretap(name: []const u8, options: GreOptions) !void {
     try builder.addAttrU8(IFLA_GRE.TTL, options.ttl);
 
     builder.endNestedAttr(data_start);
+    builder.endNestedAttr(linkinfo_start);
+
+    const msg = builder.finalize(hdr);
+    const response = try nl.request(msg, allocator);
+    allocator.free(response);
+}
+
+/// Create a GENEVE interface
+pub fn createGeneve(name: []const u8, options: GeneveOptions) !void {
+    var nl = try socket.NetlinkSocket.open();
+    defer nl.close();
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var buf: [512]u8 = undefined;
+    var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
+
+    const hdr = try builder.addHeader(socket.RTM.NEWLINK, socket.NLM_F.REQUEST | socket.NLM_F.CREATE | socket.NLM_F.EXCL | socket.NLM_F.ACK);
+
+    try builder.addData(socket.IfInfoMsg, socket.IfInfoMsg{});
+
+    // Add interface name
+    try builder.addAttrString(socket.IFLA.IFNAME, name);
+
+    // Start IFLA_LINKINFO
+    const linkinfo_start = try builder.startNestedAttr(socket.IFLA.LINKINFO);
+
+    // IFLA_INFO_KIND = "geneve"
+    try builder.addAttrString(socket.IFLA_INFO.KIND, "geneve");
+
+    // Start IFLA_INFO_DATA
+    const data_start = try builder.startNestedAttr(socket.IFLA_INFO.DATA);
+
+    // VNI (required)
+    try builder.addAttrU32(IFLA_GENEVE.ID, options.vni);
+
+    // Remote address
+    if (options.remote) |remote| {
+        try builder.addAttr(IFLA_GENEVE.REMOTE, &remote);
+    }
+
+    // Port
+    const port_be = std.mem.nativeToBig(u16, options.port);
+    try builder.addAttrU16(IFLA_GENEVE.PORT, port_be);
+
+    // TTL
+    try builder.addAttrU8(IFLA_GENEVE.TTL, options.ttl);
+
+    builder.endNestedAttr(data_start);
+    builder.endNestedAttr(linkinfo_start);
+
+    const msg = builder.finalize(hdr);
+    const response = try nl.request(msg, allocator);
+    allocator.free(response);
+}
+
+/// Create an IP-in-IP tunnel interface
+pub fn createIpip(name: []const u8, options: IpipOptions) !void {
+    var nl = try socket.NetlinkSocket.open();
+    defer nl.close();
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var buf: [512]u8 = undefined;
+    var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
+
+    const hdr = try builder.addHeader(socket.RTM.NEWLINK, socket.NLM_F.REQUEST | socket.NLM_F.CREATE | socket.NLM_F.EXCL | socket.NLM_F.ACK);
+
+    try builder.addData(socket.IfInfoMsg, socket.IfInfoMsg{});
+
+    // Add interface name
+    try builder.addAttrString(socket.IFLA.IFNAME, name);
+
+    // Start IFLA_LINKINFO
+    const linkinfo_start = try builder.startNestedAttr(socket.IFLA.LINKINFO);
+
+    // IFLA_INFO_KIND = "ipip"
+    try builder.addAttrString(socket.IFLA_INFO.KIND, "ipip");
+
+    // Start IFLA_INFO_DATA
+    const data_start = try builder.startNestedAttr(socket.IFLA_INFO.DATA);
+
+    // Local address
+    try builder.addAttr(IFLA_IPTUN.LOCAL, &options.local);
+
+    // Remote address
+    try builder.addAttr(IFLA_IPTUN.REMOTE, &options.remote);
+
+    // TTL
+    try builder.addAttrU8(IFLA_IPTUN.TTL, options.ttl);
+
+    // PMTU discovery
+    try builder.addAttrU8(IFLA_IPTUN.PMTUDISC, if (options.pmtudisc) 1 else 0);
+
+    builder.endNestedAttr(data_start);
+    builder.endNestedAttr(linkinfo_start);
+
+    const msg = builder.finalize(hdr);
+    const response = try nl.request(msg, allocator);
+    allocator.free(response);
+}
+
+/// Create a SIT (IPv6-in-IPv4) tunnel interface
+pub fn createSit(name: []const u8, options: IpipOptions) !void {
+    var nl = try socket.NetlinkSocket.open();
+    defer nl.close();
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var buf: [512]u8 = undefined;
+    var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
+
+    const hdr = try builder.addHeader(socket.RTM.NEWLINK, socket.NLM_F.REQUEST | socket.NLM_F.CREATE | socket.NLM_F.EXCL | socket.NLM_F.ACK);
+
+    try builder.addData(socket.IfInfoMsg, socket.IfInfoMsg{});
+
+    // Add interface name
+    try builder.addAttrString(socket.IFLA.IFNAME, name);
+
+    // Start IFLA_LINKINFO
+    const linkinfo_start = try builder.startNestedAttr(socket.IFLA.LINKINFO);
+
+    // IFLA_INFO_KIND = "sit" (Simple Internet Transition)
+    try builder.addAttrString(socket.IFLA_INFO.KIND, "sit");
+
+    // Start IFLA_INFO_DATA
+    const data_start = try builder.startNestedAttr(socket.IFLA_INFO.DATA);
+
+    // Local address
+    try builder.addAttr(IFLA_IPTUN.LOCAL, &options.local);
+
+    // Remote address
+    try builder.addAttr(IFLA_IPTUN.REMOTE, &options.remote);
+
+    // TTL
+    try builder.addAttrU8(IFLA_IPTUN.TTL, options.ttl);
+
+    // PMTU discovery
+    try builder.addAttrU8(IFLA_IPTUN.PMTUDISC, if (options.pmtudisc) 1 else 0);
+
+    builder.endNestedAttr(data_start);
+    builder.endNestedAttr(linkinfo_start);
+
+    const msg = builder.finalize(hdr);
+    const response = try nl.request(msg, allocator);
+    allocator.free(response);
+}
+
+/// Create a WireGuard interface (interface only - peer config requires wg tool or generic netlink)
+pub fn createWireguard(name: []const u8) !void {
+    var nl = try socket.NetlinkSocket.open();
+    defer nl.close();
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var buf: [256]u8 = undefined;
+    var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
+
+    const hdr = try builder.addHeader(socket.RTM.NEWLINK, socket.NLM_F.REQUEST | socket.NLM_F.CREATE | socket.NLM_F.EXCL | socket.NLM_F.ACK);
+
+    try builder.addData(socket.IfInfoMsg, socket.IfInfoMsg{});
+
+    // Add interface name
+    try builder.addAttrString(socket.IFLA.IFNAME, name);
+
+    // Start IFLA_LINKINFO
+    const linkinfo_start = try builder.startNestedAttr(socket.IFLA.LINKINFO);
+
+    // IFLA_INFO_KIND = "wireguard"
+    try builder.addAttrString(socket.IFLA_INFO.KIND, "wireguard");
+
     builder.endNestedAttr(linkinfo_start);
 
     const msg = builder.finalize(hdr);

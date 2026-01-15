@@ -299,6 +299,8 @@ pub const PreApplyValidator = struct {
             .vlan => |vlan| try self.validateVlanCommand(vlan, index),
             .veth => {}, // Veth creation doesn't need pre-validation
             .analyze => {},
+            .tc => {}, // TC commands validated via CLI
+            .tunnel => {}, // Tunnel commands validated via CLI
         }
     }
 

@@ -67,6 +67,8 @@ pub const Validator = struct {
             .vlan => |vlan| try self.validateVlanCommand(vlan, cmd.action, cmd.attributes),
             .veth => |veth| try self.validateVethCommand(veth, cmd.action),
             .analyze => {}, // Always valid
+            .tc => {}, // TC commands validated separately
+            .tunnel => {}, // Tunnel commands validated separately
         }
     }
 

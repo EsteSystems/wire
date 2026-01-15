@@ -101,6 +101,8 @@ fn getCommandName(cmd: *const parser.Command) []const u8 {
         .interface => |i| return i.name orelse "",
         .route => return "route",
         .analyze => return "analyze",
+        .tc => |t| return t.interface orelse "tc",
+        .tunnel => |t| return t.name orelse "tunnel",
     }
 }
 

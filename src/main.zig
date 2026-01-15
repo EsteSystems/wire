@@ -2640,15 +2640,23 @@ fn handleTunnel(args: []const []const u8) !void {
 
     if (args.len < 1) {
         try stdout.print("Usage: wire tunnel <type> <name> [options...]\n", .{});
-        try stdout.print("\nTypes:\n", .{});
+        try stdout.print("\nOverlay Tunnels:\n", .{});
         try stdout.print("  vxlan <name> vni <id> [local <ip>] [group <ip>] [port <port>]\n", .{});
+        try stdout.print("  geneve <name> vni <id> [remote <ip>] [port <port>]\n", .{});
+        try stdout.print("\nPoint-to-Point Tunnels:\n", .{});
         try stdout.print("  gre <name> local <ip> remote <ip> [key <n>] [ttl <n>]\n", .{});
         try stdout.print("  gretap <name> local <ip> remote <ip> [key <n>]\n", .{});
-        try stdout.print("  delete <name>                    Delete a tunnel interface\n", .{});
+        try stdout.print("  ipip <name> local <ip> remote <ip> [ttl <n>]\n", .{});
+        try stdout.print("  sit <name> local <ip> remote <ip> [ttl <n>]    (IPv6-in-IPv4)\n", .{});
+        try stdout.print("\nEncrypted Tunnels:\n", .{});
+        try stdout.print("  wireguard <name>                  Create WireGuard interface\n", .{});
+        try stdout.print("\nManagement:\n", .{});
+        try stdout.print("  delete <name>                     Delete tunnel interface\n", .{});
         try stdout.print("\nExamples:\n", .{});
         try stdout.print("  wire tunnel vxlan vxlan100 vni 100 local 10.0.0.1\n", .{});
-        try stdout.print("  wire tunnel gre gre1 local 10.0.0.1 remote 10.0.0.2\n", .{});
-        try stdout.print("  wire tunnel delete vxlan100\n", .{});
+        try stdout.print("  wire tunnel geneve geneve1 vni 100 remote 10.0.0.2\n", .{});
+        try stdout.print("  wire tunnel ipip tun0 local 10.0.0.1 remote 10.0.0.2\n", .{});
+        try stdout.print("  wire tunnel wireguard wg0\n", .{});
         return;
     }
 
@@ -2656,12 +2664,20 @@ fn handleTunnel(args: []const []const u8) !void {
 
     if (std.mem.eql(u8, tunnel_type, "help")) {
         try stdout.print("Tunnel commands:\n", .{});
-        try stdout.print("  wire tunnel vxlan <name> vni <id> [options...]\n", .{});
-        try stdout.print("    Options: local <ip>, group <ip>, port <port>, learning, nolearning\n", .{});
+        try stdout.print("\n  wire tunnel vxlan <name> vni <id> [options...]\n", .{});
+        try stdout.print("    VXLAN overlay network. Options: local <ip>, group <ip>, port <port>\n", .{});
+        try stdout.print("\n  wire tunnel geneve <name> vni <id> [options...]\n", .{});
+        try stdout.print("    GENEVE overlay network. Options: remote <ip>, port <port>, ttl <n>\n", .{});
         try stdout.print("\n  wire tunnel gre <name> local <ip> remote <ip> [options...]\n", .{});
-        try stdout.print("    Options: key <n>, ttl <n>\n", .{});
+        try stdout.print("    GRE tunnel (Layer 3). Options: key <n>, ttl <n>\n", .{});
         try stdout.print("\n  wire tunnel gretap <name> local <ip> remote <ip> [options...]\n", .{});
-        try stdout.print("    Like gre but for Layer 2 (Ethernet) traffic\n", .{});
+        try stdout.print("    GRE TAP (Layer 2 over GRE). Options: key <n>, ttl <n>\n", .{});
+        try stdout.print("\n  wire tunnel ipip <name> local <ip> remote <ip> [ttl <n>]\n", .{});
+        try stdout.print("    IP-in-IP tunnel (IPv4 over IPv4)\n", .{});
+        try stdout.print("\n  wire tunnel sit <name> local <ip> remote <ip> [ttl <n>]\n", .{});
+        try stdout.print("    SIT tunnel (IPv6 over IPv4, for 6in4 tunneling)\n", .{});
+        try stdout.print("\n  wire tunnel wireguard <name>\n", .{});
+        try stdout.print("    WireGuard interface (use 'wg' tool for key/peer config)\n", .{});
         try stdout.print("\n  wire tunnel delete <name>\n", .{});
         try stdout.print("    Delete a tunnel interface\n", .{});
         return;
@@ -2840,6 +2856,183 @@ fn handleTunnel(args: []const []const u8) !void {
         const local_str = tunnel.formatIPv4(local_ip.?, &local_buf) catch "?";
         const remote_str = tunnel.formatIPv4(remote_ip.?, &remote_buf) catch "?";
         try stdout.print("Created GRE TAP: {s} ({s} -> {s})\n", .{ name, local_str, remote_str });
+    } else if (std.mem.eql(u8, tunnel_type, "geneve")) {
+        // wire tunnel geneve <name> vni <id> [remote <ip>] [port <port>]
+        if (args.len < 4) {
+            try stdout.print("Usage: wire tunnel geneve <name> vni <id> [remote <ip>] [port <port>]\n", .{});
+            return;
+        }
+
+        const name = args[1];
+        var options = tunnel.GeneveOptions{};
+
+        // Parse options
+        var i: usize = 2;
+        while (i < args.len) : (i += 1) {
+            if (std.mem.eql(u8, args[i], "vni") and i + 1 < args.len) {
+                options.vni = std.fmt.parseInt(u32, args[i + 1], 10) catch {
+                    try stdout.print("Invalid VNI: {s}\n", .{args[i + 1]});
+                    return;
+                };
+                i += 1;
+            } else if (std.mem.eql(u8, args[i], "remote") and i + 1 < args.len) {
+                options.remote = tunnel.parseIPv4(args[i + 1]) orelse {
+                    try stdout.print("Invalid remote IP: {s}\n", .{args[i + 1]});
+                    return;
+                };
+                i += 1;
+            } else if (std.mem.eql(u8, args[i], "port") and i + 1 < args.len) {
+                options.port = std.fmt.parseInt(u16, args[i + 1], 10) catch {
+                    try stdout.print("Invalid port: {s}\n", .{args[i + 1]});
+                    return;
+                };
+                i += 1;
+            } else if (std.mem.eql(u8, args[i], "ttl") and i + 1 < args.len) {
+                options.ttl = std.fmt.parseInt(u8, args[i + 1], 10) catch {
+                    try stdout.print("Invalid TTL: {s}\n", .{args[i + 1]});
+                    return;
+                };
+                i += 1;
+            }
+        }
+
+        tunnel.createGeneve(name, options) catch |err| {
+            try stdout.print("Failed to create GENEVE tunnel: {s}\n", .{@errorName(err)});
+            return;
+        };
+
+        try stdout.print("Created GENEVE tunnel: {s} (VNI {d}, port {d})\n", .{ name, options.vni, options.port });
+    } else if (std.mem.eql(u8, tunnel_type, "ipip")) {
+        // wire tunnel ipip <name> local <ip> remote <ip>
+        if (args.len < 6) {
+            try stdout.print("Usage: wire tunnel ipip <name> local <ip> remote <ip> [ttl <n>]\n", .{});
+            return;
+        }
+
+        const name = args[1];
+        var local_ip: ?[4]u8 = null;
+        var remote_ip: ?[4]u8 = null;
+        var ttl: u8 = 64;
+
+        // Parse options
+        var i: usize = 2;
+        while (i < args.len) : (i += 1) {
+            if (std.mem.eql(u8, args[i], "local") and i + 1 < args.len) {
+                local_ip = tunnel.parseIPv4(args[i + 1]) orelse {
+                    try stdout.print("Invalid local IP: {s}\n", .{args[i + 1]});
+                    return;
+                };
+                i += 1;
+            } else if (std.mem.eql(u8, args[i], "remote") and i + 1 < args.len) {
+                remote_ip = tunnel.parseIPv4(args[i + 1]) orelse {
+                    try stdout.print("Invalid remote IP: {s}\n", .{args[i + 1]});
+                    return;
+                };
+                i += 1;
+            } else if (std.mem.eql(u8, args[i], "ttl") and i + 1 < args.len) {
+                ttl = std.fmt.parseInt(u8, args[i + 1], 10) catch {
+                    try stdout.print("Invalid TTL: {s}\n", .{args[i + 1]});
+                    return;
+                };
+                i += 1;
+            }
+        }
+
+        if (local_ip == null or remote_ip == null) {
+            try stdout.print("Both local and remote IP addresses are required.\n", .{});
+            return;
+        }
+
+        const options = tunnel.IpipOptions{
+            .local = local_ip.?,
+            .remote = remote_ip.?,
+            .ttl = ttl,
+        };
+
+        tunnel.createIpip(name, options) catch |err| {
+            try stdout.print("Failed to create IP-in-IP tunnel: {s}\n", .{@errorName(err)});
+            return;
+        };
+
+        var local_buf: [16]u8 = undefined;
+        var remote_buf: [16]u8 = undefined;
+        const local_str = tunnel.formatIPv4(local_ip.?, &local_buf) catch "?";
+        const remote_str = tunnel.formatIPv4(remote_ip.?, &remote_buf) catch "?";
+        try stdout.print("Created IP-in-IP tunnel: {s} ({s} -> {s})\n", .{ name, local_str, remote_str });
+    } else if (std.mem.eql(u8, tunnel_type, "sit")) {
+        // wire tunnel sit <name> local <ip> remote <ip>
+        if (args.len < 6) {
+            try stdout.print("Usage: wire tunnel sit <name> local <ip> remote <ip> [ttl <n>]\n", .{});
+            return;
+        }
+
+        const name = args[1];
+        var local_ip: ?[4]u8 = null;
+        var remote_ip: ?[4]u8 = null;
+        var ttl: u8 = 64;
+
+        // Parse options
+        var i: usize = 2;
+        while (i < args.len) : (i += 1) {
+            if (std.mem.eql(u8, args[i], "local") and i + 1 < args.len) {
+                local_ip = tunnel.parseIPv4(args[i + 1]) orelse {
+                    try stdout.print("Invalid local IP: {s}\n", .{args[i + 1]});
+                    return;
+                };
+                i += 1;
+            } else if (std.mem.eql(u8, args[i], "remote") and i + 1 < args.len) {
+                remote_ip = tunnel.parseIPv4(args[i + 1]) orelse {
+                    try stdout.print("Invalid remote IP: {s}\n", .{args[i + 1]});
+                    return;
+                };
+                i += 1;
+            } else if (std.mem.eql(u8, args[i], "ttl") and i + 1 < args.len) {
+                ttl = std.fmt.parseInt(u8, args[i + 1], 10) catch {
+                    try stdout.print("Invalid TTL: {s}\n", .{args[i + 1]});
+                    return;
+                };
+                i += 1;
+            }
+        }
+
+        if (local_ip == null or remote_ip == null) {
+            try stdout.print("Both local and remote IP addresses are required.\n", .{});
+            return;
+        }
+
+        const options = tunnel.IpipOptions{
+            .local = local_ip.?,
+            .remote = remote_ip.?,
+            .ttl = ttl,
+        };
+
+        tunnel.createSit(name, options) catch |err| {
+            try stdout.print("Failed to create SIT tunnel: {s}\n", .{@errorName(err)});
+            return;
+        };
+
+        var local_buf: [16]u8 = undefined;
+        var remote_buf: [16]u8 = undefined;
+        const local_str = tunnel.formatIPv4(local_ip.?, &local_buf) catch "?";
+        const remote_str = tunnel.formatIPv4(remote_ip.?, &remote_buf) catch "?";
+        try stdout.print("Created SIT tunnel: {s} ({s} -> {s})\n", .{ name, local_str, remote_str });
+    } else if (std.mem.eql(u8, tunnel_type, "wireguard") or std.mem.eql(u8, tunnel_type, "wg")) {
+        // wire tunnel wireguard <name>
+        if (args.len < 2) {
+            try stdout.print("Usage: wire tunnel wireguard <name>\n", .{});
+            try stdout.print("\nNote: This creates the interface only. Use 'wg' tool for peer configuration.\n", .{});
+            return;
+        }
+
+        const name = args[1];
+
+        tunnel.createWireguard(name) catch |err| {
+            try stdout.print("Failed to create WireGuard interface: {s}\n", .{@errorName(err)});
+            return;
+        };
+
+        try stdout.print("Created WireGuard interface: {s}\n", .{name});
+        try stdout.print("Use 'wg set {s} ...' to configure keys and peers\n", .{name});
     } else if (std.mem.eql(u8, tunnel_type, "delete") or std.mem.eql(u8, tunnel_type, "del")) {
         // wire tunnel delete <name>
         if (args.len < 2) {
@@ -2856,7 +3049,7 @@ fn handleTunnel(args: []const []const u8) !void {
         try stdout.print("Deleted tunnel: {s}\n", .{name});
     } else {
         try stdout.print("Unknown tunnel type: {s}\n", .{tunnel_type});
-        try stdout.print("Available: vxlan, gre, gretap, delete\n", .{});
+        try stdout.print("Available: vxlan, gre, gretap, geneve, ipip, sit, wireguard, delete\n", .{});
     }
 }
 
@@ -2864,17 +3057,27 @@ fn handleTc(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const stdout = std.io.getStdOut().writer();
 
     if (args.len < 1) {
-        try stdout.print("Usage: wire tc <interface> [show|add|del]\n", .{});
-        try stdout.print("\nCommands:\n", .{});
+        try stdout.print("Usage: wire tc <interface> [show|add|del|class|filter]\n", .{});
+        try stdout.print("\nQdisc Commands:\n", .{});
         try stdout.print("  wire tc <interface>                      Show qdiscs\n", .{});
         try stdout.print("  wire tc <interface> add pfifo [limit <n>]\n", .{});
         try stdout.print("  wire tc <interface> add fq_codel          Fair queuing with CoDel\n", .{});
         try stdout.print("  wire tc <interface> add tbf rate <bps> burst <bytes> [latency <us>]\n", .{});
-        try stdout.print("  wire tc <interface> del [handle <h>]      Delete qdisc\n", .{});
+        try stdout.print("  wire tc <interface> add htb [default <class>]  Hierarchical Token Bucket\n", .{});
+        try stdout.print("  wire tc <interface> del                   Delete root qdisc\n", .{});
+        try stdout.print("\nClass Commands (for HTB):\n", .{});
+        try stdout.print("  wire tc <interface> class                 Show classes\n", .{});
+        try stdout.print("  wire tc <interface> class add <id> rate <r> [ceil <r>] [prio <n>]\n", .{});
+        try stdout.print("  wire tc <interface> class del <id>        Delete class\n", .{});
+        try stdout.print("\nFilter Commands:\n", .{});
+        try stdout.print("  wire tc <interface> filter                Show filters\n", .{});
+        try stdout.print("  wire tc <interface> filter add u32 match ip dst <ip/mask> flowid <id>\n", .{});
+        try stdout.print("  wire tc <interface> filter add fw handle <mark> classid <id>\n", .{});
+        try stdout.print("  wire tc <interface> filter del prio <n>   Delete filter\n", .{});
         try stdout.print("\nExamples:\n", .{});
-        try stdout.print("  wire tc eth0                              Show qdiscs on eth0\n", .{});
-        try stdout.print("  wire tc eth0 add fq_codel                 Use fq_codel\n", .{});
-        try stdout.print("  wire tc eth0 add tbf rate 10mbit burst 32k\n", .{});
+        try stdout.print("  wire tc eth0 add htb default 10           HTB for class-based shaping\n", .{});
+        try stdout.print("  wire tc eth0 class add 1:10 rate 10mbit   Add class with 10mbit rate\n", .{});
+        try stdout.print("  wire tc eth0 filter add u32 match ip dst 10.0.0.0/8 flowid 1:10\n", .{});
         return;
     }
 
@@ -2888,9 +3091,17 @@ fn handleTc(allocator: std.mem.Allocator, args: []const []const u8) !void {
         try stdout.print("      pfifo                          Simple FIFO queue\n", .{});
         try stdout.print("      fq_codel                       Fair queuing + CoDel AQM\n", .{});
         try stdout.print("      tbf rate <r> burst <b>         Token bucket for rate limiting\n", .{});
+        try stdout.print("      htb [default <class>]          Hierarchical Token Bucket (for classes)\n", .{});
         try stdout.print("\n  wire tc <interface> del            Delete root qdisc\n", .{});
-        try stdout.print("\nRate units: bps, kbit, mbit, gbit\n", .{});
-        try stdout.print("Burst units: bytes, k, m\n", .{});
+        try stdout.print("\n  wire tc <interface> class          Show classes on interface\n", .{});
+        try stdout.print("  wire tc <interface> class add <classid> rate <r> [ceil <r>] [prio <n>]\n", .{});
+        try stdout.print("  wire tc <interface> class del <classid>\n", .{});
+        try stdout.print("\n  wire tc <interface> filter         Show filters on interface\n", .{});
+        try stdout.print("  wire tc <interface> filter add u32 match ip dst <ip/mask> flowid <classid>\n", .{});
+        try stdout.print("  wire tc <interface> filter add fw handle <mark> classid <classid>\n", .{});
+        try stdout.print("  wire tc <interface> filter del prio <n>\n", .{});
+        try stdout.print("\nClass/filter IDs: format is major:minor (e.g., 1:10, 1:20)\n", .{});
+        try stdout.print("Rate units: bps, kbit, mbit, gbit\n", .{});
         return;
     }
 
@@ -2946,7 +3157,7 @@ fn handleTc(allocator: std.mem.Allocator, args: []const []const u8) !void {
         // wire tc <interface> add <type> [options]
         if (args.len < 3) {
             try stdout.print("Usage: wire tc <interface> add <type> [options]\n", .{});
-            try stdout.print("Types: pfifo, fq_codel, tbf\n", .{});
+            try stdout.print("Types: pfifo, fq_codel, tbf, htb\n", .{});
             return;
         }
 
@@ -3021,9 +3232,34 @@ fn handleTc(allocator: std.mem.Allocator, args: []const []const u8) !void {
             };
 
             try stdout.print("Added tbf qdisc to {s} (rate {d} bps, burst {d} bytes)\n", .{ iface_name, rate_bps.?, burst.? });
+        } else if (std.mem.eql(u8, qdisc_type, "htb")) {
+            // wire tc <interface> add htb [default <classid>]
+            var default_class: ?u32 = null;
+
+            var i: usize = 3;
+            while (i < args.len) : (i += 1) {
+                if (std.mem.eql(u8, args[i], "default") and i + 1 < args.len) {
+                    default_class = std.fmt.parseInt(u32, args[i + 1], 10) catch {
+                        try stdout.print("Invalid default class: {s}\n", .{args[i + 1]});
+                        return;
+                    };
+                    i += 1;
+                }
+            }
+
+            qdisc.addHtbQdisc(if_index, qdisc.TC_H.make(1, 0), qdisc.TC_H.ROOT, default_class) catch |err| {
+                try stdout.print("Failed to add htb qdisc: {}\n", .{err});
+                return;
+            };
+
+            if (default_class) |dc| {
+                try stdout.print("Added htb qdisc to {s} (default class 1:{d})\n", .{ iface_name, dc });
+            } else {
+                try stdout.print("Added htb qdisc to {s}\n", .{iface_name});
+            }
         } else {
             try stdout.print("Unknown qdisc type: {s}\n", .{qdisc_type});
-            try stdout.print("Available: pfifo, fq_codel, tbf\n", .{});
+            try stdout.print("Available: pfifo, fq_codel, tbf, htb\n", .{});
         }
     } else if (std.mem.eql(u8, subcommand, "del") or std.mem.eql(u8, subcommand, "delete")) {
         // wire tc <interface> del
@@ -3033,9 +3269,357 @@ fn handleTc(allocator: std.mem.Allocator, args: []const []const u8) !void {
         };
 
         try stdout.print("Deleted root qdisc from {s}\n", .{iface_name});
+    } else if (std.mem.eql(u8, subcommand, "class")) {
+        // wire tc <interface> class [show|add|del]
+        var class_cmd: []const u8 = "show";
+        if (args.len > 2) {
+            class_cmd = args[2];
+        }
+
+        if (std.mem.eql(u8, class_cmd, "show")) {
+            // wire tc <interface> class show
+            const classes = qdisc.getClasses(allocator, if_index) catch |err| {
+                try stdout.print("Failed to get classes: {}\n", .{err});
+                return;
+            };
+            defer allocator.free(classes);
+
+            if (classes.len == 0) {
+                try stdout.print("No classes found on {s}\n", .{iface_name});
+                return;
+            }
+
+            try stdout.print("Classes on {s}:\n", .{iface_name});
+            try stdout.print("{s:<12} {s:<12} {s:<12}\n", .{ "Class ID", "Parent", "Type" });
+            try stdout.print("{s:-<12} {s:-<12} {s:-<12}\n", .{ "", "", "" });
+
+            for (classes) |*c| {
+                var handle_buf: [16]u8 = undefined;
+                var parent_buf: [16]u8 = undefined;
+                const handle_str = c.formatHandle(&handle_buf) catch "?";
+                const parent_str = c.formatParent(&parent_buf) catch "?";
+
+                try stdout.print("{s:<12} {s:<12} {s:<12}\n", .{
+                    handle_str,
+                    parent_str,
+                    c.getKind(),
+                });
+            }
+        } else if (std.mem.eql(u8, class_cmd, "add")) {
+            // wire tc <interface> class add <classid> rate <rate> [ceil <rate>] [prio <n>]
+            if (args.len < 6) {
+                try stdout.print("Usage: wire tc <interface> class add <classid> rate <rate> [ceil <rate>] [prio <n>]\n", .{});
+                try stdout.print("\nOptions:\n", .{});
+                try stdout.print("  classid   Class ID in format major:minor (e.g., 1:10)\n", .{});
+                try stdout.print("  rate      Guaranteed rate (e.g., 10mbit, 1gbit)\n", .{});
+                try stdout.print("  ceil      Maximum rate (defaults to rate)\n", .{});
+                try stdout.print("  prio      Priority 0-7 (lower = higher priority)\n", .{});
+                try stdout.print("\nExample:\n", .{});
+                try stdout.print("  wire tc eth0 class add 1:10 rate 10mbit ceil 100mbit prio 1\n", .{});
+                return;
+            }
+
+            const classid_str = args[3];
+            const classid = parseClassId(classid_str) orelse {
+                try stdout.print("Invalid class ID: {s}\n", .{classid_str});
+                try stdout.print("Expected format: major:minor (e.g., 1:10)\n", .{});
+                return;
+            };
+
+            var rate_bps: ?u64 = null;
+            var ceil_bps: u64 = 0;
+            var prio: u32 = 0;
+            var parent = qdisc.TC_H.make(1, 0); // Default parent is root qdisc 1:0
+
+            var i: usize = 4;
+            while (i < args.len) : (i += 1) {
+                if (std.mem.eql(u8, args[i], "rate") and i + 1 < args.len) {
+                    rate_bps = parseRate(args[i + 1]) orelse {
+                        try stdout.print("Invalid rate: {s}\n", .{args[i + 1]});
+                        return;
+                    };
+                    i += 1;
+                } else if (std.mem.eql(u8, args[i], "ceil") and i + 1 < args.len) {
+                    ceil_bps = parseRate(args[i + 1]) orelse {
+                        try stdout.print("Invalid ceil: {s}\n", .{args[i + 1]});
+                        return;
+                    };
+                    i += 1;
+                } else if (std.mem.eql(u8, args[i], "prio") and i + 1 < args.len) {
+                    prio = std.fmt.parseInt(u32, args[i + 1], 10) catch {
+                        try stdout.print("Invalid priority: {s}\n", .{args[i + 1]});
+                        return;
+                    };
+                    i += 1;
+                } else if (std.mem.eql(u8, args[i], "parent") and i + 1 < args.len) {
+                    parent = parseClassId(args[i + 1]) orelse {
+                        try stdout.print("Invalid parent: {s}\n", .{args[i + 1]});
+                        return;
+                    };
+                    i += 1;
+                }
+            }
+
+            if (rate_bps == null) {
+                try stdout.print("Rate is required for class.\n", .{});
+                try stdout.print("Example: wire tc eth0 class add 1:10 rate 10mbit\n", .{});
+                return;
+            }
+
+            qdisc.addHtbClass(if_index, classid, parent, rate_bps.?, ceil_bps, prio) catch |err| {
+                try stdout.print("Failed to add class: {}\n", .{err});
+                return;
+            };
+
+            const major = qdisc.TC_H.getMajor(classid);
+            const minor = qdisc.TC_H.getMinor(classid);
+            try stdout.print("Added HTB class {d}:{d} on {s} (rate {d} bps)\n", .{ major, minor, iface_name, rate_bps.? });
+        } else if (std.mem.eql(u8, class_cmd, "del") or std.mem.eql(u8, class_cmd, "delete")) {
+            // wire tc <interface> class del <classid>
+            if (args.len < 4) {
+                try stdout.print("Usage: wire tc <interface> class del <classid>\n", .{});
+                try stdout.print("Example: wire tc eth0 class del 1:10\n", .{});
+                return;
+            }
+
+            const classid_str = args[3];
+            const classid = parseClassId(classid_str) orelse {
+                try stdout.print("Invalid class ID: {s}\n", .{classid_str});
+                try stdout.print("Expected format: major:minor (e.g., 1:10)\n", .{});
+                return;
+            };
+
+            qdisc.deleteClass(if_index, classid) catch |err| {
+                try stdout.print("Failed to delete class: {}\n", .{err});
+                return;
+            };
+
+            const major = qdisc.TC_H.getMajor(classid);
+            const minor = qdisc.TC_H.getMinor(classid);
+            try stdout.print("Deleted class {d}:{d} from {s}\n", .{ major, minor, iface_name });
+        } else {
+            try stdout.print("Unknown class subcommand: {s}\n", .{class_cmd});
+            try stdout.print("Available: show, add, del\n", .{});
+        }
+    } else if (std.mem.eql(u8, subcommand, "filter")) {
+        // wire tc <interface> filter [show|add|del]
+        var filter_cmd: []const u8 = "show";
+        if (args.len > 2) {
+            filter_cmd = args[2];
+        }
+
+        if (std.mem.eql(u8, filter_cmd, "show")) {
+            // wire tc <interface> filter show
+            const filters = qdisc.getFilters(allocator, if_index, qdisc.TC_H.make(1, 0)) catch |err| {
+                try stdout.print("Failed to get filters: {}\n", .{err});
+                return;
+            };
+            defer allocator.free(filters);
+
+            if (filters.len == 0) {
+                try stdout.print("No filters found on {s}\n", .{iface_name});
+                return;
+            }
+
+            try stdout.print("Filters on {s}:\n", .{iface_name});
+            try stdout.print("{s:<12} {s:<12} {s:<8} {s:<8} {s:<8}\n", .{ "Handle", "Parent", "Prio", "Proto", "Type" });
+            try stdout.print("{s:-<12} {s:-<12} {s:-<8} {s:-<8} {s:-<8}\n", .{ "", "", "", "", "" });
+
+            for (filters) |*f| {
+                var handle_buf: [16]u8 = undefined;
+                var parent_buf: [16]u8 = undefined;
+                const handle_str = f.formatHandle(&handle_buf) catch "?";
+                const parent_str = f.formatParent(&parent_buf) catch "?";
+
+                const proto_str = switch (std.mem.bigToNative(u16, f.protocol)) {
+                    qdisc.ETH_P.IP => "ip",
+                    qdisc.ETH_P.IPV6 => "ipv6",
+                    qdisc.ETH_P.ARP => "arp",
+                    qdisc.ETH_P.ALL => "all",
+                    else => "?",
+                };
+
+                try stdout.print("{s:<12} {s:<12} {d:<8} {s:<8} {s:<8}\n", .{
+                    handle_str,
+                    parent_str,
+                    f.priority,
+                    proto_str,
+                    f.getKind(),
+                });
+            }
+        } else if (std.mem.eql(u8, filter_cmd, "add")) {
+            // wire tc <interface> filter add <type> ...
+            if (args.len < 4) {
+                try stdout.print("Usage: wire tc <interface> filter add <type> [options]\n", .{});
+                try stdout.print("\nFilter types:\n", .{});
+                try stdout.print("  u32 match ip dst <ip/mask> flowid <classid> [prio <n>]\n", .{});
+                try stdout.print("  fw handle <mark> classid <classid> [prio <n>]\n", .{});
+                try stdout.print("\nExamples:\n", .{});
+                try stdout.print("  wire tc eth0 filter add u32 match ip dst 10.0.0.0/8 flowid 1:10\n", .{});
+                try stdout.print("  wire tc eth0 filter add fw handle 1 classid 1:20 prio 1\n", .{});
+                return;
+            }
+
+            const filter_type = args[3];
+
+            if (std.mem.eql(u8, filter_type, "u32")) {
+                // wire tc <interface> filter add u32 match ip dst <ip/mask> flowid <classid>
+                var dst_ip: ?[4]u8 = null;
+                var dst_mask: [4]u8 = .{ 255, 255, 255, 255 };
+                var flowid: ?u32 = null;
+                var prio: u16 = 1;
+
+                var i: usize = 4;
+                while (i < args.len) : (i += 1) {
+                    if (std.mem.eql(u8, args[i], "match") and i + 4 < args.len) {
+                        if (std.mem.eql(u8, args[i + 1], "ip") and std.mem.eql(u8, args[i + 2], "dst")) {
+                            const ip_mask = parseIPWithMask(args[i + 3]);
+                            if (ip_mask) |im| {
+                                dst_ip = im.ip;
+                                dst_mask = im.mask;
+                            } else {
+                                try stdout.print("Invalid IP/mask: {s}\n", .{args[i + 3]});
+                                return;
+                            }
+                            i += 3;
+                        }
+                    } else if (std.mem.eql(u8, args[i], "flowid") and i + 1 < args.len) {
+                        flowid = parseClassId(args[i + 1]) orelse {
+                            try stdout.print("Invalid flowid: {s}\n", .{args[i + 1]});
+                            return;
+                        };
+                        i += 1;
+                    } else if (std.mem.eql(u8, args[i], "prio") and i + 1 < args.len) {
+                        prio = std.fmt.parseInt(u16, args[i + 1], 10) catch {
+                            try stdout.print("Invalid priority: {s}\n", .{args[i + 1]});
+                            return;
+                        };
+                        i += 1;
+                    }
+                }
+
+                if (dst_ip == null or flowid == null) {
+                    try stdout.print("Missing required options.\n", .{});
+                    try stdout.print("Example: wire tc eth0 filter add u32 match ip dst 10.0.0.0/8 flowid 1:10\n", .{});
+                    return;
+                }
+
+                qdisc.addU32FilterDstIP(if_index, qdisc.TC_H.make(1, 0), prio, dst_ip.?, dst_mask, flowid.?) catch |err| {
+                    try stdout.print("Failed to add filter: {}\n", .{err});
+                    return;
+                };
+
+                const major = qdisc.TC_H.getMajor(flowid.?);
+                const minor = qdisc.TC_H.getMinor(flowid.?);
+                try stdout.print("Added u32 filter on {s} -> class {d}:{d}\n", .{ iface_name, major, minor });
+            } else if (std.mem.eql(u8, filter_type, "fw")) {
+                // wire tc <interface> filter add fw handle <mark> classid <classid>
+                var fwmark: ?u32 = null;
+                var classid: ?u32 = null;
+                var prio: u16 = 1;
+
+                var i: usize = 4;
+                while (i < args.len) : (i += 1) {
+                    if (std.mem.eql(u8, args[i], "handle") and i + 1 < args.len) {
+                        const mark_str = args[i + 1];
+                        fwmark = if (mark_str.len > 2 and std.mem.eql(u8, mark_str[0..2], "0x"))
+                            std.fmt.parseInt(u32, mark_str[2..], 16) catch {
+                                try stdout.print("Invalid handle: {s}\n", .{mark_str});
+                                return;
+                            }
+                        else
+                            std.fmt.parseInt(u32, mark_str, 10) catch {
+                                try stdout.print("Invalid handle: {s}\n", .{mark_str});
+                                return;
+                            };
+                        i += 1;
+                    } else if (std.mem.eql(u8, args[i], "classid") and i + 1 < args.len) {
+                        classid = parseClassId(args[i + 1]) orelse {
+                            try stdout.print("Invalid classid: {s}\n", .{args[i + 1]});
+                            return;
+                        };
+                        i += 1;
+                    } else if (std.mem.eql(u8, args[i], "prio") and i + 1 < args.len) {
+                        prio = std.fmt.parseInt(u16, args[i + 1], 10) catch {
+                            try stdout.print("Invalid priority: {s}\n", .{args[i + 1]});
+                            return;
+                        };
+                        i += 1;
+                    }
+                }
+
+                if (fwmark == null or classid == null) {
+                    try stdout.print("Missing required options.\n", .{});
+                    try stdout.print("Example: wire tc eth0 filter add fw handle 1 classid 1:20\n", .{});
+                    return;
+                }
+
+                qdisc.addFwFilter(if_index, qdisc.TC_H.make(1, 0), prio, fwmark.?, classid.?) catch |err| {
+                    try stdout.print("Failed to add filter: {}\n", .{err});
+                    return;
+                };
+
+                const major = qdisc.TC_H.getMajor(classid.?);
+                const minor = qdisc.TC_H.getMinor(classid.?);
+                try stdout.print("Added fw filter on {s}: mark {d} -> class {d}:{d}\n", .{ iface_name, fwmark.?, major, minor });
+            } else {
+                try stdout.print("Unknown filter type: {s}\n", .{filter_type});
+                try stdout.print("Available: u32, fw\n", .{});
+            }
+        } else if (std.mem.eql(u8, filter_cmd, "del") or std.mem.eql(u8, filter_cmd, "delete")) {
+            // wire tc <interface> filter del prio <n> [handle <h>]
+            if (args.len < 5) {
+                try stdout.print("Usage: wire tc <interface> filter del prio <n> [handle <h>]\n", .{});
+                try stdout.print("Example: wire tc eth0 filter del prio 1\n", .{});
+                return;
+            }
+
+            var prio: ?u16 = null;
+            var handle: u32 = 0;
+
+            var i: usize = 3;
+            while (i < args.len) : (i += 1) {
+                if (std.mem.eql(u8, args[i], "prio") and i + 1 < args.len) {
+                    prio = std.fmt.parseInt(u16, args[i + 1], 10) catch {
+                        try stdout.print("Invalid priority: {s}\n", .{args[i + 1]});
+                        return;
+                    };
+                    i += 1;
+                } else if (std.mem.eql(u8, args[i], "handle") and i + 1 < args.len) {
+                    const h_str = args[i + 1];
+                    handle = if (h_str.len > 2 and std.mem.eql(u8, h_str[0..2], "0x"))
+                        std.fmt.parseInt(u32, h_str[2..], 16) catch {
+                            try stdout.print("Invalid handle: {s}\n", .{h_str});
+                            return;
+                        }
+                    else
+                        std.fmt.parseInt(u32, h_str, 10) catch {
+                            try stdout.print("Invalid handle: {s}\n", .{h_str});
+                            return;
+                        };
+                    i += 1;
+                }
+            }
+
+            if (prio == null) {
+                try stdout.print("Priority is required.\n", .{});
+                try stdout.print("Example: wire tc eth0 filter del prio 1\n", .{});
+                return;
+            }
+
+            qdisc.deleteFilter(if_index, qdisc.TC_H.make(1, 0), prio.?, handle, qdisc.ETH_P.IP) catch |err| {
+                try stdout.print("Failed to delete filter: {}\n", .{err});
+                return;
+            };
+
+            try stdout.print("Deleted filter with priority {d} from {s}\n", .{ prio.?, iface_name });
+        } else {
+            try stdout.print("Unknown filter subcommand: {s}\n", .{filter_cmd});
+            try stdout.print("Available: show, add, del\n", .{});
+        }
     } else {
         try stdout.print("Unknown tc subcommand: {s}\n", .{subcommand});
-        try stdout.print("Available: show, add, del\n", .{});
+        try stdout.print("Available: show, add, del, class, filter\n", .{});
     }
 }
 
@@ -3102,6 +3686,91 @@ fn parseSize(s: []const u8) ?u32 {
     }
 
     return num * multiplier;
+}
+
+/// IP with mask result
+const IPWithMask = struct {
+    ip: [4]u8,
+    mask: [4]u8,
+};
+
+/// Parse IP address with optional CIDR mask (e.g., "10.0.0.0/8" or "192.168.1.1")
+fn parseIPWithMask(s: []const u8) ?IPWithMask {
+    // Find slash for CIDR notation
+    var slash_pos: ?usize = null;
+    for (s, 0..) |c, i| {
+        if (c == '/') {
+            slash_pos = i;
+            break;
+        }
+    }
+
+    const ip_str = if (slash_pos) |pos| s[0..pos] else s;
+    const mask_len: u8 = if (slash_pos) |pos|
+        std.fmt.parseInt(u8, s[pos + 1 ..], 10) catch return null
+    else
+        32;
+
+    // Parse IP address
+    var ip: [4]u8 = undefined;
+    var octet_idx: usize = 0;
+    var octet_start: usize = 0;
+
+    for (ip_str, 0..) |c, i| {
+        if (c == '.') {
+            if (octet_idx >= 3) return null;
+            ip[octet_idx] = std.fmt.parseInt(u8, ip_str[octet_start..i], 10) catch return null;
+            octet_idx += 1;
+            octet_start = i + 1;
+        }
+    }
+
+    if (octet_idx != 3) return null;
+    ip[3] = std.fmt.parseInt(u8, ip_str[octet_start..], 10) catch return null;
+
+    // Calculate mask from CIDR length
+    var mask: [4]u8 = .{ 0, 0, 0, 0 };
+    var remaining = mask_len;
+    for (0..4) |i| {
+        if (remaining >= 8) {
+            mask[i] = 255;
+            remaining -= 8;
+        } else if (remaining > 0) {
+            mask[i] = @as(u8, 0xFF) << @intCast(8 - remaining);
+            remaining = 0;
+        }
+    }
+
+    return IPWithMask{ .ip = ip, .mask = mask };
+}
+
+/// Parse class ID string like "1:10" to u32 handle
+fn parseClassId(s: []const u8) ?u32 {
+    // Find the colon
+    var colon_pos: ?usize = null;
+    for (s, 0..) |c, i| {
+        if (c == ':') {
+            colon_pos = i;
+            break;
+        }
+    }
+
+    if (colon_pos) |pos| {
+        const major_str = s[0..pos];
+        const minor_str = s[pos + 1 ..];
+
+        const major = std.fmt.parseInt(u16, major_str, 10) catch return null;
+        const minor = if (minor_str.len > 0)
+            std.fmt.parseInt(u16, minor_str, 10) catch return null
+        else
+            0;
+
+        return qdisc.TC_H.make(major, minor);
+    } else {
+        // No colon, try parsing as a simple number (minor only, major 1)
+        const minor = std.fmt.parseInt(u16, s, 10) catch return null;
+        return qdisc.TC_H.make(1, minor);
+    }
 }
 
 fn handleTopology(allocator: std.mem.Allocator, args: []const []const u8) !void {

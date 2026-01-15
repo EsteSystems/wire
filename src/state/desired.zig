@@ -25,6 +25,8 @@ fn processCommand(state: *types.NetworkState, cmd: *const parser.Command) !void 
         .veth => |veth| try processVethCommand(state, veth, cmd.action),
         .route => |route| try processRouteCommand(state, route, cmd.action, cmd.attributes),
         .analyze => {}, // Not a state-modifying command
+        .tc => {}, // TC commands are runtime-only, not tracked in desired state
+        .tunnel => {}, // Tunnel creation handled via interface commands
     }
 }
 
