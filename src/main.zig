@@ -53,19 +53,19 @@ pub fn main() !void {
         return;
     }
 
-    const command = args[1];
+    const first_arg = args[1];
 
-    if (std.mem.eql(u8, command, "--version") or std.mem.eql(u8, command, "-v")) {
+    if (std.mem.eql(u8, first_arg, "--version") or std.mem.eql(u8, first_arg, "-v")) {
         try printVersion();
         return;
     }
 
-    if (std.mem.eql(u8, command, "--help") or std.mem.eql(u8, command, "-h")) {
+    if (std.mem.eql(u8, first_arg, "--help") or std.mem.eql(u8, first_arg, "-h")) {
         try printUsage();
         return;
     }
 
-    // Execute command
+    // Execute command (handles --json flag internally)
     executeCommand(allocator, args[1..]) catch |err| {
         const stderr = std.io.getStdErr().writer();
         try stderr.print("Error: {}\n", .{err});
@@ -79,62 +79,85 @@ fn executeCommand(allocator: std.mem.Allocator, args: []const []const u8) !void 
         return;
     }
 
-    const subject = args[0];
+    // Check if --json flag is first, find the actual command
+    const has_json = args.len > 0 and (std.mem.eql(u8, args[0], "--json") or std.mem.eql(u8, args[0], "-j"));
+    const cmd_idx: usize = if (has_json) 1 else 0;
+
+    if (cmd_idx >= args.len) {
+        try printUsage();
+        return;
+    }
+
+    const subject = args[cmd_idx];
+    // Args after the command (e.g., "eth0 show" for "wire interface eth0 show")
+    const post_cmd_args = args[cmd_idx + 1 ..];
+
+    // Build handler args: if --json was global flag, prepend it so handlers can detect it
+    var handler_args_list = std.ArrayList([]const u8).init(allocator);
+    defer handler_args_list.deinit();
+
+    if (has_json) {
+        try handler_args_list.append("--json");
+    }
+    for (post_cmd_args) |arg| {
+        try handler_args_list.append(arg);
+    }
+    const handler_args = handler_args_list.items;
 
     if (std.mem.eql(u8, subject, "interface")) {
-        try handleInterface(allocator, args[1..]);
+        try handleInterface(allocator, handler_args);
     } else if (std.mem.eql(u8, subject, "route")) {
-        try handleRoute(allocator, args[1..]);
+        try handleRoute(allocator, handler_args);
     } else if (std.mem.eql(u8, subject, "analyze")) {
         try handleAnalyze(allocator);
     } else if (std.mem.eql(u8, subject, "apply")) {
-        try handleApply(allocator, args[1..]);
+        try handleApply(allocator, handler_args);
     } else if (std.mem.eql(u8, subject, "validate")) {
-        try handleValidate(allocator, args[1..]);
+        try handleValidate(allocator, handler_args);
     } else if (std.mem.eql(u8, subject, "bond")) {
-        try handleBond(allocator, args[1..]);
+        try handleBond(allocator, handler_args);
     } else if (std.mem.eql(u8, subject, "bridge")) {
-        try handleBridge(allocator, args[1..]);
+        try handleBridge(allocator, handler_args);
     } else if (std.mem.eql(u8, subject, "vlan")) {
-        try handleVlan(allocator, args[1..]);
+        try handleVlan(allocator, handler_args);
     } else if (std.mem.eql(u8, subject, "veth")) {
-        try handleVeth(allocator, args[1..]);
+        try handleVeth(allocator, handler_args);
     } else if (std.mem.eql(u8, subject, "state")) {
-        try handleState(allocator, args[1..]);
+        try handleState(allocator, handler_args);
     } else if (std.mem.eql(u8, subject, "diff")) {
-        try handleDiff(allocator, args[1..]);
+        try handleDiff(allocator, handler_args);
     } else if (std.mem.eql(u8, subject, "events")) {
-        try handleEvents(args[1..]);
+        try handleEvents(handler_args);
     } else if (std.mem.eql(u8, subject, "reconcile")) {
-        try handleReconcile(allocator, args[1..]);
+        try handleReconcile(allocator, handler_args);
     } else if (std.mem.eql(u8, subject, "daemon")) {
-        try handleDaemon(allocator, args[1..]);
+        try handleDaemon(allocator, handler_args);
     } else if (std.mem.eql(u8, subject, "history")) {
-        try handleHistory(allocator, args[1..]);
+        try handleHistory(allocator, handler_args);
     } else if (std.mem.eql(u8, subject, "neighbor")) {
-        try handleNeighbor(allocator, args[1..]);
+        try handleNeighbor(allocator, handler_args);
     } else if (std.mem.eql(u8, subject, "rule")) {
-        try handleRule(allocator, args[1..]);
+        try handleRule(allocator, handler_args);
     } else if (std.mem.eql(u8, subject, "netns") or std.mem.eql(u8, subject, "namespace")) {
-        try handleNamespace(allocator, args[1..]);
+        try handleNamespace(allocator, handler_args);
     } else if (std.mem.eql(u8, subject, "hw") or std.mem.eql(u8, subject, "hardware")) {
-        try handleHardware(args[1..]);
+        try handleHardware(allocator, handler_args);
     } else if (std.mem.eql(u8, subject, "tunnel")) {
-        try handleTunnel(args[1..]);
+        try handleTunnel(allocator, handler_args);
     } else if (std.mem.eql(u8, subject, "tc") or std.mem.eql(u8, subject, "qdisc")) {
-        try handleTc(allocator, args[1..]);
+        try handleTc(allocator, handler_args);
     } else if (std.mem.eql(u8, subject, "topology")) {
-        try handleTopology(allocator, args[1..]);
+        try handleTopology(allocator, handler_args);
     } else if (std.mem.eql(u8, subject, "diagnose")) {
-        try handleDiagnose(allocator, args[1..]);
+        try handleDiagnose(allocator, handler_args);
     } else if (std.mem.eql(u8, subject, "trace")) {
-        try handlePathTrace(allocator, args[1..]);
+        try handlePathTrace(allocator, handler_args);
     } else if (std.mem.eql(u8, subject, "probe")) {
-        try handleProbe(allocator, args[1..]);
+        try handleProbe(allocator, handler_args);
     } else if (std.mem.eql(u8, subject, "validate")) {
-        try handleValidate(allocator, args[1..]);
+        try handleValidate(allocator, handler_args);
     } else if (std.mem.eql(u8, subject, "watch")) {
-        try handleWatch(allocator, args[1..]);
+        try handleWatch(allocator, handler_args);
     } else {
         const stderr = std.io.getStdErr().writer();
         try stderr.print("Unknown command: {s}\n", .{subject});
@@ -206,6 +229,17 @@ fn handleInterface(allocator: std.mem.Allocator, args: []const []const u8) !void
         const maybe_iface = try netlink_interface.getInterfaceByName(allocator, iface_name);
 
         if (maybe_iface) |iface| {
+            // Get addresses
+            const addrs = try netlink_address.getAddressesForInterface(allocator, @intCast(iface.index));
+            defer allocator.free(addrs);
+
+            if (use_json) {
+                var json = json_output.JsonOutput.init(allocator);
+                try json.writeInterface(&iface, addrs);
+                try stdout.writeAll("\n");
+                return;
+            }
+
             const state = if (iface.isUp()) "UP" else "DOWN";
             const carrier = if (iface.hasCarrier()) "CARRIER" else "NO-CARRIER";
 
@@ -224,10 +258,6 @@ fn handleInterface(allocator: std.mem.Allocator, args: []const []const u8) !void
 
             try stdout.print("    operstate: {s}\n", .{iface.operstateString()});
 
-            // Get addresses
-            const addrs = try netlink_address.getAddressesForInterface(allocator, @intCast(iface.index));
-            defer allocator.free(addrs);
-
             for (addrs) |addr| {
                 var addr_buf: [64]u8 = undefined;
                 const addr_str = try addr.formatAddress(&addr_buf);
@@ -235,6 +265,11 @@ fn handleInterface(allocator: std.mem.Allocator, args: []const []const u8) !void
                 try stdout.print("    {s} {s} scope {s}\n", .{ family, addr_str, addr.scopeString() });
             }
         } else {
+            if (use_json) {
+                var json = json_output.JsonOutput.init(allocator);
+                try json.writeError("Interface not found");
+                return;
+            }
             try stdout.print("Interface {s} not found\n", .{iface_name});
         }
         return;
@@ -2542,10 +2577,13 @@ fn handleNamespace(allocator: std.mem.Allocator, args: []const []const u8) !void
     }
 }
 
-fn handleHardware(args: []const []const u8) !void {
+fn handleHardware(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const stdout = std.io.getStdOut().writer();
+    const use_json = json_output.hasJsonFlag(args);
+    const filtered_args = try json_output.filterJsonFlag(allocator, args);
+    defer allocator.free(filtered_args);
 
-    if (args.len < 1) {
+    if (filtered_args.len < 1) {
         try stdout.print("Usage: wire hw <interface> [show|ring|coalesce]\n", .{});
         try stdout.print("\nCommands:\n", .{});
         try stdout.print("  wire hw <interface>              Show hardware info\n", .{});
@@ -2557,7 +2595,7 @@ fn handleHardware(args: []const []const u8) !void {
         return;
     }
 
-    const iface_name = args[0];
+    const iface_name = filtered_args[0];
 
     if (std.mem.eql(u8, iface_name, "help")) {
         try stdout.print("Hardware Tuning commands:\n", .{});
@@ -2575,8 +2613,8 @@ fn handleHardware(args: []const []const u8) !void {
     }
 
     var subcommand: []const u8 = "show";
-    if (args.len > 1) {
-        subcommand = args[1];
+    if (filtered_args.len > 1) {
+        subcommand = filtered_args[1];
     }
 
     if (std.mem.eql(u8, subcommand, "show")) {
@@ -2623,22 +2661,22 @@ fn handleHardware(args: []const []const u8) !void {
         } else |_| {}
     } else if (std.mem.eql(u8, subcommand, "ring")) {
         // wire hw <interface> ring [set rx <n> tx <n>]
-        if (args.len > 2 and std.mem.eql(u8, args[2], "set")) {
+        if (filtered_args.len > 2 and std.mem.eql(u8, filtered_args[2], "set")) {
             // Parse set options
             var rx: ?u32 = null;
             var tx: ?u32 = null;
 
             var i: usize = 3;
-            while (i < args.len) : (i += 1) {
-                if (std.mem.eql(u8, args[i], "rx") and i + 1 < args.len) {
-                    rx = std.fmt.parseInt(u32, args[i + 1], 10) catch {
-                        try stdout.print("Invalid RX value: {s}\n", .{args[i + 1]});
+            while (i < filtered_args.len) : (i += 1) {
+                if (std.mem.eql(u8, filtered_args[i], "rx") and i + 1 < filtered_args.len) {
+                    rx = std.fmt.parseInt(u32, filtered_args[i + 1], 10) catch {
+                        try stdout.print("Invalid RX value: {s}\n", .{filtered_args[i + 1]});
                         return;
                     };
                     i += 1;
-                } else if (std.mem.eql(u8, args[i], "tx") and i + 1 < args.len) {
-                    tx = std.fmt.parseInt(u32, args[i + 1], 10) catch {
-                        try stdout.print("Invalid TX value: {s}\n", .{args[i + 1]});
+                } else if (std.mem.eql(u8, filtered_args[i], "tx") and i + 1 < filtered_args.len) {
+                    tx = std.fmt.parseInt(u32, filtered_args[i + 1], 10) catch {
+                        try stdout.print("Invalid TX value: {s}\n", .{filtered_args[i + 1]});
                         return;
                     };
                     i += 1;
@@ -2661,32 +2699,46 @@ fn handleHardware(args: []const []const u8) !void {
         } else {
             // Show ring params
             const ring = ethtool.getRingParams(iface_name) catch |err| {
-                try stdout.print("Failed to get ring parameters: {s}\n", .{@errorName(err)});
+                if (use_json) {
+                    try stdout.print("{{\"error\": \"{s}\"}}\n", .{@errorName(err)});
+                } else {
+                    try stdout.print("Failed to get ring parameters: {s}\n", .{@errorName(err)});
+                }
                 return;
             };
 
-            try stdout.print("Ring parameters for {s}:\n", .{iface_name});
-            try stdout.print("  RX:  current {d}, max {d}\n", .{ ring.rx_current, ring.rx_max });
-            try stdout.print("  TX:  current {d}, max {d}\n", .{ ring.tx_current, ring.tx_max });
+            if (use_json) {
+                try stdout.print("{{\n", .{});
+                try stdout.print("  \"interface\": \"{s}\",\n", .{iface_name});
+                try stdout.print("  \"rx_current\": {d},\n", .{ring.rx_current});
+                try stdout.print("  \"rx_max\": {d},\n", .{ring.rx_max});
+                try stdout.print("  \"tx_current\": {d},\n", .{ring.tx_current});
+                try stdout.print("  \"tx_max\": {d}\n", .{ring.tx_max});
+                try stdout.print("}}\n", .{});
+            } else {
+                try stdout.print("Ring parameters for {s}:\n", .{iface_name});
+                try stdout.print("  RX:  current {d}, max {d}\n", .{ ring.rx_current, ring.rx_max });
+                try stdout.print("  TX:  current {d}, max {d}\n", .{ ring.tx_current, ring.tx_max });
+            }
         }
     } else if (std.mem.eql(u8, subcommand, "coalesce")) {
         // wire hw <interface> coalesce [set rx <usecs> tx <usecs>]
-        if (args.len > 2 and std.mem.eql(u8, args[2], "set")) {
+        if (filtered_args.len > 2 and std.mem.eql(u8, filtered_args[2], "set")) {
             // Parse set options
             var rx_usecs: ?u32 = null;
             var tx_usecs: ?u32 = null;
 
             var i: usize = 3;
-            while (i < args.len) : (i += 1) {
-                if (std.mem.eql(u8, args[i], "rx") and i + 1 < args.len) {
-                    rx_usecs = std.fmt.parseInt(u32, args[i + 1], 10) catch {
-                        try stdout.print("Invalid RX value: {s}\n", .{args[i + 1]});
+            while (i < filtered_args.len) : (i += 1) {
+                if (std.mem.eql(u8, filtered_args[i], "rx") and i + 1 < filtered_args.len) {
+                    rx_usecs = std.fmt.parseInt(u32, filtered_args[i + 1], 10) catch {
+                        try stdout.print("Invalid RX value: {s}\n", .{filtered_args[i + 1]});
                         return;
                     };
                     i += 1;
-                } else if (std.mem.eql(u8, args[i], "tx") and i + 1 < args.len) {
-                    tx_usecs = std.fmt.parseInt(u32, args[i + 1], 10) catch {
-                        try stdout.print("Invalid TX value: {s}\n", .{args[i + 1]});
+                } else if (std.mem.eql(u8, filtered_args[i], "tx") and i + 1 < filtered_args.len) {
+                    tx_usecs = std.fmt.parseInt(u32, filtered_args[i + 1], 10) catch {
+                        try stdout.print("Invalid TX value: {s}\n", .{filtered_args[i + 1]});
                         return;
                     };
                     i += 1;
@@ -2709,15 +2761,31 @@ fn handleHardware(args: []const []const u8) !void {
         } else {
             // Show coalesce params
             const coal = ethtool.getCoalesceParams(iface_name) catch |err| {
-                try stdout.print("Failed to get coalesce parameters: {s}\n", .{@errorName(err)});
+                if (use_json) {
+                    try stdout.print("{{\"error\": \"{s}\"}}\n", .{@errorName(err)});
+                } else {
+                    try stdout.print("Failed to get coalesce parameters: {s}\n", .{@errorName(err)});
+                }
                 return;
             };
 
-            try stdout.print("Coalesce parameters for {s}:\n", .{iface_name});
-            try stdout.print("  RX: {d} usecs, {d} frames\n", .{ coal.rx_usecs, coal.rx_frames });
-            try stdout.print("  TX: {d} usecs, {d} frames\n", .{ coal.tx_usecs, coal.tx_frames });
-            try stdout.print("  Adaptive RX: {s}\n", .{if (coal.adaptive_rx) "on" else "off"});
-            try stdout.print("  Adaptive TX: {s}\n", .{if (coal.adaptive_tx) "on" else "off"});
+            if (use_json) {
+                try stdout.print("{{\n", .{});
+                try stdout.print("  \"interface\": \"{s}\",\n", .{iface_name});
+                try stdout.print("  \"rx_usecs\": {d},\n", .{coal.rx_usecs});
+                try stdout.print("  \"rx_frames\": {d},\n", .{coal.rx_frames});
+                try stdout.print("  \"tx_usecs\": {d},\n", .{coal.tx_usecs});
+                try stdout.print("  \"tx_frames\": {d},\n", .{coal.tx_frames});
+                try stdout.print("  \"adaptive_rx\": {s},\n", .{if (coal.adaptive_rx) "true" else "false"});
+                try stdout.print("  \"adaptive_tx\": {s}\n", .{if (coal.adaptive_tx) "true" else "false"});
+                try stdout.print("}}\n", .{});
+            } else {
+                try stdout.print("Coalesce parameters for {s}:\n", .{iface_name});
+                try stdout.print("  RX: {d} usecs, {d} frames\n", .{ coal.rx_usecs, coal.rx_frames });
+                try stdout.print("  TX: {d} usecs, {d} frames\n", .{ coal.tx_usecs, coal.tx_frames });
+                try stdout.print("  Adaptive RX: {s}\n", .{if (coal.adaptive_rx) "on" else "off"});
+                try stdout.print("  Adaptive TX: {s}\n", .{if (coal.adaptive_tx) "on" else "off"});
+            }
         }
     } else {
         try stdout.print("Unknown hw subcommand: {s}\n", .{subcommand});
@@ -2725,10 +2793,14 @@ fn handleHardware(args: []const []const u8) !void {
     }
 }
 
-fn handleTunnel(args: []const []const u8) !void {
+fn handleTunnel(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const stdout = std.io.getStdOut().writer();
 
-    if (args.len < 1) {
+    // Filter out --json flag (JSON output not yet implemented for tunnel commands)
+    const filtered_args = try json_output.filterJsonFlag(allocator, args);
+    defer allocator.free(filtered_args);
+
+    if (filtered_args.len < 1) {
         try stdout.print("Usage: wire tunnel <type> <name> [options...]\n", .{});
         try stdout.print("\nOverlay Tunnels:\n", .{});
         try stdout.print("  vxlan <name> vni <id> [local <ip>] [group <ip>] [port <port>]\n", .{});
@@ -2750,7 +2822,7 @@ fn handleTunnel(args: []const []const u8) !void {
         return;
     }
 
-    const tunnel_type = args[0];
+    const tunnel_type = filtered_args[0];
 
     if (std.mem.eql(u8, tunnel_type, "help")) {
         try stdout.print("Tunnel commands:\n", .{});
@@ -2781,39 +2853,39 @@ fn handleTunnel(args: []const []const u8) !void {
             return;
         }
 
-        const name = args[1];
+        const name = filtered_args[1];
         var options = tunnel.VxlanOptions{};
 
         // Parse options
         var i: usize = 2;
-        while (i < args.len) : (i += 1) {
-            if (std.mem.eql(u8, args[i], "vni") and i + 1 < args.len) {
-                options.vni = std.fmt.parseInt(u32, args[i + 1], 10) catch {
-                    try stdout.print("Invalid VNI: {s}\n", .{args[i + 1]});
+        while (i < filtered_args.len) : (i += 1) {
+            if (std.mem.eql(u8, filtered_args[i], "vni") and i + 1 < filtered_args.len) {
+                options.vni = std.fmt.parseInt(u32, filtered_args[i + 1], 10) catch {
+                    try stdout.print("Invalid VNI: {s}\n", .{filtered_args[i + 1]});
                     return;
                 };
                 i += 1;
-            } else if (std.mem.eql(u8, args[i], "local") and i + 1 < args.len) {
-                options.local = tunnel.parseIPv4(args[i + 1]) orelse {
-                    try stdout.print("Invalid local IP: {s}\n", .{args[i + 1]});
+            } else if (std.mem.eql(u8, filtered_args[i], "local") and i + 1 < filtered_args.len) {
+                options.local = tunnel.parseIPv4(filtered_args[i + 1]) orelse {
+                    try stdout.print("Invalid local IP: {s}\n", .{filtered_args[i + 1]});
                     return;
                 };
                 i += 1;
-            } else if (std.mem.eql(u8, args[i], "group") and i + 1 < args.len) {
-                options.group = tunnel.parseIPv4(args[i + 1]) orelse {
-                    try stdout.print("Invalid group IP: {s}\n", .{args[i + 1]});
+            } else if (std.mem.eql(u8, filtered_args[i], "group") and i + 1 < filtered_args.len) {
+                options.group = tunnel.parseIPv4(filtered_args[i + 1]) orelse {
+                    try stdout.print("Invalid group IP: {s}\n", .{filtered_args[i + 1]});
                     return;
                 };
                 i += 1;
-            } else if (std.mem.eql(u8, args[i], "port") and i + 1 < args.len) {
-                options.port = std.fmt.parseInt(u16, args[i + 1], 10) catch {
-                    try stdout.print("Invalid port: {s}\n", .{args[i + 1]});
+            } else if (std.mem.eql(u8, filtered_args[i], "port") and i + 1 < filtered_args.len) {
+                options.port = std.fmt.parseInt(u16, filtered_args[i + 1], 10) catch {
+                    try stdout.print("Invalid port: {s}\n", .{filtered_args[i + 1]});
                     return;
                 };
                 i += 1;
-            } else if (std.mem.eql(u8, args[i], "learning")) {
+            } else if (std.mem.eql(u8, filtered_args[i], "learning")) {
                 options.learning = true;
-            } else if (std.mem.eql(u8, args[i], "nolearning")) {
+            } else if (std.mem.eql(u8, filtered_args[i], "nolearning")) {
                 options.learning = false;
             }
         }
@@ -2826,12 +2898,12 @@ fn handleTunnel(args: []const []const u8) !void {
         try stdout.print("Created VXLAN interface: {s} (VNI {d})\n", .{ name, options.vni });
     } else if (std.mem.eql(u8, tunnel_type, "gre")) {
         // wire tunnel gre <name> local <ip> remote <ip> [key <n>]
-        if (args.len < 6) {
+        if (filtered_args.len < 6) {
             try stdout.print("Usage: wire tunnel gre <name> local <ip> remote <ip> [key <n>] [ttl <n>]\n", .{});
             return;
         }
 
-        const name = args[1];
+        const name = filtered_args[1];
         var local_ip: ?[4]u8 = null;
         var remote_ip: ?[4]u8 = null;
         var key: ?u32 = null;
@@ -2839,28 +2911,28 @@ fn handleTunnel(args: []const []const u8) !void {
 
         // Parse options
         var i: usize = 2;
-        while (i < args.len) : (i += 1) {
-            if (std.mem.eql(u8, args[i], "local") and i + 1 < args.len) {
-                local_ip = tunnel.parseIPv4(args[i + 1]) orelse {
-                    try stdout.print("Invalid local IP: {s}\n", .{args[i + 1]});
+        while (i < filtered_args.len) : (i += 1) {
+            if (std.mem.eql(u8, filtered_args[i], "local") and i + 1 < filtered_args.len) {
+                local_ip = tunnel.parseIPv4(filtered_args[i + 1]) orelse {
+                    try stdout.print("Invalid local IP: {s}\n", .{filtered_args[i + 1]});
                     return;
                 };
                 i += 1;
-            } else if (std.mem.eql(u8, args[i], "remote") and i + 1 < args.len) {
-                remote_ip = tunnel.parseIPv4(args[i + 1]) orelse {
-                    try stdout.print("Invalid remote IP: {s}\n", .{args[i + 1]});
+            } else if (std.mem.eql(u8, filtered_args[i], "remote") and i + 1 < filtered_args.len) {
+                remote_ip = tunnel.parseIPv4(filtered_args[i + 1]) orelse {
+                    try stdout.print("Invalid remote IP: {s}\n", .{filtered_args[i + 1]});
                     return;
                 };
                 i += 1;
-            } else if (std.mem.eql(u8, args[i], "key") and i + 1 < args.len) {
-                key = std.fmt.parseInt(u32, args[i + 1], 10) catch {
-                    try stdout.print("Invalid key: {s}\n", .{args[i + 1]});
+            } else if (std.mem.eql(u8, filtered_args[i], "key") and i + 1 < filtered_args.len) {
+                key = std.fmt.parseInt(u32, filtered_args[i + 1], 10) catch {
+                    try stdout.print("Invalid key: {s}\n", .{filtered_args[i + 1]});
                     return;
                 };
                 i += 1;
-            } else if (std.mem.eql(u8, args[i], "ttl") and i + 1 < args.len) {
-                ttl = std.fmt.parseInt(u8, args[i + 1], 10) catch {
-                    try stdout.print("Invalid TTL: {s}\n", .{args[i + 1]});
+            } else if (std.mem.eql(u8, filtered_args[i], "ttl") and i + 1 < filtered_args.len) {
+                ttl = std.fmt.parseInt(u8, filtered_args[i + 1], 10) catch {
+                    try stdout.print("Invalid TTL: {s}\n", .{filtered_args[i + 1]});
                     return;
                 };
                 i += 1;
@@ -2891,34 +2963,34 @@ fn handleTunnel(args: []const []const u8) !void {
         try stdout.print("Created GRE tunnel: {s} ({s} -> {s})\n", .{ name, local_str, remote_str });
     } else if (std.mem.eql(u8, tunnel_type, "gretap")) {
         // wire tunnel gretap <name> local <ip> remote <ip> [key <n>]
-        if (args.len < 6) {
+        if (filtered_args.len < 6) {
             try stdout.print("Usage: wire tunnel gretap <name> local <ip> remote <ip> [key <n>]\n", .{});
             return;
         }
 
-        const name = args[1];
+        const name = filtered_args[1];
         var local_ip: ?[4]u8 = null;
         var remote_ip: ?[4]u8 = null;
         var key: ?u32 = null;
 
         // Parse options
         var i: usize = 2;
-        while (i < args.len) : (i += 1) {
-            if (std.mem.eql(u8, args[i], "local") and i + 1 < args.len) {
-                local_ip = tunnel.parseIPv4(args[i + 1]) orelse {
-                    try stdout.print("Invalid local IP: {s}\n", .{args[i + 1]});
+        while (i < filtered_args.len) : (i += 1) {
+            if (std.mem.eql(u8, filtered_args[i], "local") and i + 1 < filtered_args.len) {
+                local_ip = tunnel.parseIPv4(filtered_args[i + 1]) orelse {
+                    try stdout.print("Invalid local IP: {s}\n", .{filtered_args[i + 1]});
                     return;
                 };
                 i += 1;
-            } else if (std.mem.eql(u8, args[i], "remote") and i + 1 < args.len) {
-                remote_ip = tunnel.parseIPv4(args[i + 1]) orelse {
-                    try stdout.print("Invalid remote IP: {s}\n", .{args[i + 1]});
+            } else if (std.mem.eql(u8, filtered_args[i], "remote") and i + 1 < filtered_args.len) {
+                remote_ip = tunnel.parseIPv4(filtered_args[i + 1]) orelse {
+                    try stdout.print("Invalid remote IP: {s}\n", .{filtered_args[i + 1]});
                     return;
                 };
                 i += 1;
-            } else if (std.mem.eql(u8, args[i], "key") and i + 1 < args.len) {
-                key = std.fmt.parseInt(u32, args[i + 1], 10) catch {
-                    try stdout.print("Invalid key: {s}\n", .{args[i + 1]});
+            } else if (std.mem.eql(u8, filtered_args[i], "key") and i + 1 < filtered_args.len) {
+                key = std.fmt.parseInt(u32, filtered_args[i + 1], 10) catch {
+                    try stdout.print("Invalid key: {s}\n", .{filtered_args[i + 1]});
                     return;
                 };
                 i += 1;
@@ -2948,38 +3020,38 @@ fn handleTunnel(args: []const []const u8) !void {
         try stdout.print("Created GRE TAP: {s} ({s} -> {s})\n", .{ name, local_str, remote_str });
     } else if (std.mem.eql(u8, tunnel_type, "geneve")) {
         // wire tunnel geneve <name> vni <id> [remote <ip>] [port <port>]
-        if (args.len < 4) {
+        if (filtered_args.len < 4) {
             try stdout.print("Usage: wire tunnel geneve <name> vni <id> [remote <ip>] [port <port>]\n", .{});
             return;
         }
 
-        const name = args[1];
+        const name = filtered_args[1];
         var options = tunnel.GeneveOptions{};
 
         // Parse options
         var i: usize = 2;
-        while (i < args.len) : (i += 1) {
-            if (std.mem.eql(u8, args[i], "vni") and i + 1 < args.len) {
-                options.vni = std.fmt.parseInt(u32, args[i + 1], 10) catch {
-                    try stdout.print("Invalid VNI: {s}\n", .{args[i + 1]});
+        while (i < filtered_args.len) : (i += 1) {
+            if (std.mem.eql(u8, filtered_args[i], "vni") and i + 1 < filtered_args.len) {
+                options.vni = std.fmt.parseInt(u32, filtered_args[i + 1], 10) catch {
+                    try stdout.print("Invalid VNI: {s}\n", .{filtered_args[i + 1]});
                     return;
                 };
                 i += 1;
-            } else if (std.mem.eql(u8, args[i], "remote") and i + 1 < args.len) {
-                options.remote = tunnel.parseIPv4(args[i + 1]) orelse {
-                    try stdout.print("Invalid remote IP: {s}\n", .{args[i + 1]});
+            } else if (std.mem.eql(u8, filtered_args[i], "remote") and i + 1 < filtered_args.len) {
+                options.remote = tunnel.parseIPv4(filtered_args[i + 1]) orelse {
+                    try stdout.print("Invalid remote IP: {s}\n", .{filtered_args[i + 1]});
                     return;
                 };
                 i += 1;
-            } else if (std.mem.eql(u8, args[i], "port") and i + 1 < args.len) {
-                options.port = std.fmt.parseInt(u16, args[i + 1], 10) catch {
-                    try stdout.print("Invalid port: {s}\n", .{args[i + 1]});
+            } else if (std.mem.eql(u8, filtered_args[i], "port") and i + 1 < filtered_args.len) {
+                options.port = std.fmt.parseInt(u16, filtered_args[i + 1], 10) catch {
+                    try stdout.print("Invalid port: {s}\n", .{filtered_args[i + 1]});
                     return;
                 };
                 i += 1;
-            } else if (std.mem.eql(u8, args[i], "ttl") and i + 1 < args.len) {
-                options.ttl = std.fmt.parseInt(u8, args[i + 1], 10) catch {
-                    try stdout.print("Invalid TTL: {s}\n", .{args[i + 1]});
+            } else if (std.mem.eql(u8, filtered_args[i], "ttl") and i + 1 < filtered_args.len) {
+                options.ttl = std.fmt.parseInt(u8, filtered_args[i + 1], 10) catch {
+                    try stdout.print("Invalid TTL: {s}\n", .{filtered_args[i + 1]});
                     return;
                 };
                 i += 1;
@@ -2994,34 +3066,34 @@ fn handleTunnel(args: []const []const u8) !void {
         try stdout.print("Created GENEVE tunnel: {s} (VNI {d}, port {d})\n", .{ name, options.vni, options.port });
     } else if (std.mem.eql(u8, tunnel_type, "ipip")) {
         // wire tunnel ipip <name> local <ip> remote <ip>
-        if (args.len < 6) {
+        if (filtered_args.len < 6) {
             try stdout.print("Usage: wire tunnel ipip <name> local <ip> remote <ip> [ttl <n>]\n", .{});
             return;
         }
 
-        const name = args[1];
+        const name = filtered_args[1];
         var local_ip: ?[4]u8 = null;
         var remote_ip: ?[4]u8 = null;
         var ttl: u8 = 64;
 
         // Parse options
         var i: usize = 2;
-        while (i < args.len) : (i += 1) {
-            if (std.mem.eql(u8, args[i], "local") and i + 1 < args.len) {
-                local_ip = tunnel.parseIPv4(args[i + 1]) orelse {
-                    try stdout.print("Invalid local IP: {s}\n", .{args[i + 1]});
+        while (i < filtered_args.len) : (i += 1) {
+            if (std.mem.eql(u8, filtered_args[i], "local") and i + 1 < filtered_args.len) {
+                local_ip = tunnel.parseIPv4(filtered_args[i + 1]) orelse {
+                    try stdout.print("Invalid local IP: {s}\n", .{filtered_args[i + 1]});
                     return;
                 };
                 i += 1;
-            } else if (std.mem.eql(u8, args[i], "remote") and i + 1 < args.len) {
-                remote_ip = tunnel.parseIPv4(args[i + 1]) orelse {
-                    try stdout.print("Invalid remote IP: {s}\n", .{args[i + 1]});
+            } else if (std.mem.eql(u8, filtered_args[i], "remote") and i + 1 < filtered_args.len) {
+                remote_ip = tunnel.parseIPv4(filtered_args[i + 1]) orelse {
+                    try stdout.print("Invalid remote IP: {s}\n", .{filtered_args[i + 1]});
                     return;
                 };
                 i += 1;
-            } else if (std.mem.eql(u8, args[i], "ttl") and i + 1 < args.len) {
-                ttl = std.fmt.parseInt(u8, args[i + 1], 10) catch {
-                    try stdout.print("Invalid TTL: {s}\n", .{args[i + 1]});
+            } else if (std.mem.eql(u8, filtered_args[i], "ttl") and i + 1 < filtered_args.len) {
+                ttl = std.fmt.parseInt(u8, filtered_args[i + 1], 10) catch {
+                    try stdout.print("Invalid TTL: {s}\n", .{filtered_args[i + 1]});
                     return;
                 };
                 i += 1;
@@ -3051,28 +3123,28 @@ fn handleTunnel(args: []const []const u8) !void {
         try stdout.print("Created IP-in-IP tunnel: {s} ({s} -> {s})\n", .{ name, local_str, remote_str });
     } else if (std.mem.eql(u8, tunnel_type, "sit")) {
         // wire tunnel sit <name> local <ip> remote <ip>
-        if (args.len < 6) {
+        if (filtered_args.len < 6) {
             try stdout.print("Usage: wire tunnel sit <name> local <ip> remote <ip> [ttl <n>]\n", .{});
             return;
         }
 
-        const name = args[1];
+        const name = filtered_args[1];
         var local_ip: ?[4]u8 = null;
         var remote_ip: ?[4]u8 = null;
         var ttl: u8 = 64;
 
         // Parse options
         var i: usize = 2;
-        while (i < args.len) : (i += 1) {
-            if (std.mem.eql(u8, args[i], "local") and i + 1 < args.len) {
-                local_ip = tunnel.parseIPv4(args[i + 1]) orelse {
-                    try stdout.print("Invalid local IP: {s}\n", .{args[i + 1]});
+        while (i < filtered_args.len) : (i += 1) {
+            if (std.mem.eql(u8, filtered_args[i], "local") and i + 1 < filtered_args.len) {
+                local_ip = tunnel.parseIPv4(filtered_args[i + 1]) orelse {
+                    try stdout.print("Invalid local IP: {s}\n", .{filtered_args[i + 1]});
                     return;
                 };
                 i += 1;
-            } else if (std.mem.eql(u8, args[i], "remote") and i + 1 < args.len) {
-                remote_ip = tunnel.parseIPv4(args[i + 1]) orelse {
-                    try stdout.print("Invalid remote IP: {s}\n", .{args[i + 1]});
+            } else if (std.mem.eql(u8, filtered_args[i], "remote") and i + 1 < filtered_args.len) {
+                remote_ip = tunnel.parseIPv4(filtered_args[i + 1]) orelse {
+                    try stdout.print("Invalid remote IP: {s}\n", .{filtered_args[i + 1]});
                     return;
                 };
                 i += 1;
