@@ -78,11 +78,18 @@ _wire_completions() {
             ;;
         tunnel)
             if [[ $cword -eq 2 ]]; then
-                COMPREPLY=($(compgen -W "vxlan gre gretap delete help" -- "$cur"))
+                COMPREPLY=($(compgen -W "vxlan gre gretap geneve ipip sit wireguard delete help" -- "$cur"))
             elif [[ "${COMP_WORDS[2]}" == "vxlan" ]]; then
                 COMPREPLY=($(compgen -W "vni local group port learning nolearning" -- "$cur"))
             elif [[ "${COMP_WORDS[2]}" == "gre" || "${COMP_WORDS[2]}" == "gretap" ]]; then
                 COMPREPLY=($(compgen -W "local remote key ttl" -- "$cur"))
+            elif [[ "${COMP_WORDS[2]}" == "geneve" ]]; then
+                COMPREPLY=($(compgen -W "id remote port ttl" -- "$cur"))
+            elif [[ "${COMP_WORDS[2]}" == "ipip" || "${COMP_WORDS[2]}" == "sit" ]]; then
+                COMPREPLY=($(compgen -W "local remote ttl" -- "$cur"))
+            elif [[ "${COMP_WORDS[2]}" == "wireguard" ]]; then
+                # WireGuard just needs interface name
+                COMPREPLY=()
             fi
             ;;
         rule)
@@ -121,13 +128,31 @@ _wire_completions() {
                 local interfaces=$(ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | cut -d@ -f1)
                 COMPREPLY=($(compgen -W "$interfaces help" -- "$cur"))
             elif [[ $cword -eq 3 ]]; then
-                COMPREPLY=($(compgen -W "show add del" -- "$cur"))
+                COMPREPLY=($(compgen -W "show add del class filter" -- "$cur"))
             elif [[ $cword -eq 4 && "${COMP_WORDS[3]}" == "add" ]]; then
-                COMPREPLY=($(compgen -W "pfifo fq_codel tbf" -- "$cur"))
+                COMPREPLY=($(compgen -W "pfifo fq_codel tbf htb" -- "$cur"))
             elif [[ "${COMP_WORDS[4]}" == "tbf" ]]; then
                 COMPREPLY=($(compgen -W "rate burst latency" -- "$cur"))
             elif [[ "${COMP_WORDS[4]}" == "pfifo" ]]; then
                 COMPREPLY=($(compgen -W "limit" -- "$cur"))
+            elif [[ "${COMP_WORDS[4]}" == "htb" ]]; then
+                COMPREPLY=($(compgen -W "default" -- "$cur"))
+            elif [[ "${COMP_WORDS[3]}" == "class" ]]; then
+                if [[ $cword -eq 4 ]]; then
+                    COMPREPLY=($(compgen -W "show add del" -- "$cur"))
+                elif [[ $cword -ge 5 && "${COMP_WORDS[4]}" == "add" ]]; then
+                    COMPREPLY=($(compgen -W "rate ceil prio" -- "$cur"))
+                fi
+            elif [[ "${COMP_WORDS[3]}" == "filter" ]]; then
+                if [[ $cword -eq 4 ]]; then
+                    COMPREPLY=($(compgen -W "show add del" -- "$cur"))
+                elif [[ $cword -eq 5 && "${COMP_WORDS[4]}" == "add" ]]; then
+                    COMPREPLY=($(compgen -W "u32 fw" -- "$cur"))
+                elif [[ "${COMP_WORDS[5]}" == "u32" ]]; then
+                    COMPREPLY=($(compgen -W "match flowid" -- "$cur"))
+                elif [[ "${COMP_WORDS[5]}" == "fw" ]]; then
+                    COMPREPLY=($(compgen -W "handle classid" -- "$cur"))
+                fi
             fi
             ;;
         hw|hardware)

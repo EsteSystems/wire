@@ -1,0 +1,26 @@
+Source: wire
+Section: net
+Priority: optional
+Maintainer: Este Systems <support@este.systems>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.0
+Homepage: https://github.com/EsteSystems/wire
+Rules-Requires-Root: no
+
+Package: wire
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Recommends: iproute2
+Description: Declarative network configuration tool for Linux
+ Wire is a low-level, declarative, continuously-supervised network
+ configuration tool for Linux. It combines the direct kernel access of
+ iproute2 with the desired-state model of infrastructure-as-code tools,
+ wrapped in a natural language CLI.
+ .
+ Features:
+  - Direct netlink operation (no command wrapping)
+  - Unified syntax (CLI = config file format)
+  - Continuous supervision with drift detection
+  - Built-in network analysis and diagnostics
+  - Bond, bridge, VLAN, tunnel management
+  - Traffic control and hardware tuning

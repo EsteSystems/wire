@@ -1,0 +1,598 @@
+.\" wire.8 - Wire Network Configuration Tool
+.\" Copyright (c) 2025-2026 Este Systems
+.\"
+.TH WIRE 8 "January 2026" "wire 1.0" "System Administration"
+.SH NAME
+wire \- declarative network configuration tool for Linux
+.SH SYNOPSIS
+.B wire
+[\fB\-h\fR|\fB\-\-help\fR]
+[\fB\-v\fR|\fB\-\-version\fR]
+[\fB\-\-json\fR|\fB\-j\fR]
+.I command
+[\fIarguments\fR]
+.SH DESCRIPTION
+.B wire
+is a low-level, declarative, continuously-supervised network configuration
+tool for Linux. It combines the direct kernel access of iproute2 with the
+desired-state model of infrastructure-as-code tools, wrapped in a natural
+language CLI.
+.PP
+.B wire
+operates directly via netlink sockets, requiring no external dependencies
+on iproute2 or other userspace tools. It can run as a daemon to continuously
+maintain desired network state, automatically correcting drift.
+.SH GLOBAL OPTIONS
+.TP
+.BR \-h ", " \-\-help
+Display help message and exit.
+.TP
+.BR \-v ", " \-\-version
+Display version information and exit.
+.TP
+.BR \-j ", " \-\-json
+Output results in JSON format (where supported).
+.SH COMMANDS
+.SS Interface Management
+.TP
+.BI "wire interface " "[name] [action] [options]"
+Manage network interfaces.
+.RS
+.TP
+.B show
+Display interface details. Without a name, lists all interfaces.
+.TP
+.B set state up|down
+Set interface administrative state.
+.TP
+.B set mtu \fIvalue\fR
+Set interface MTU.
+.TP
+.B set mac \fIaddress\fR
+Set interface MAC address.
+.TP
+.B address \fIip/prefix\fR
+Add an IP address to the interface.
+.TP
+.B address del \fIip/prefix\fR
+Remove an IP address from the interface.
+.TP
+.B stats
+Display interface statistics.
+.TP
+.B delete
+Delete the interface.
+.RE
+.SS Routing
+.TP
+.BI "wire route " "[action] [options]"
+Manage routing table entries.
+.RS
+.TP
+.B show
+Display routing table. Default action.
+.TP
+.B add \fIdestination\fR via \fIgateway\fR [dev \fIinterface\fR] [metric \fIvalue\fR]
+Add a route via a gateway.
+.TP
+.B add \fIdestination\fR dev \fIinterface\fR [metric \fIvalue\fR]
+Add a directly connected route.
+.TP
+.B add default via \fIgateway\fR
+Add a default route.
+.TP
+.B del \fIdestination\fR
+Delete a route.
+.RE
+.SS Neighbor Table (ARP/NDP)
+.TP
+.BI "wire neighbor " "[action] [options]"
+Manage the neighbor (ARP/NDP) table.
+.RS
+.TP
+.B show
+Display neighbor table entries.
+.TP
+.B add \fIip\fR lladdr \fImac\fR dev \fIinterface\fR [permanent]
+Add a static neighbor entry.
+.TP
+.B del \fIip\fR dev \fIinterface\fR
+Delete a neighbor entry.
+.TP
+.B lookup \fIip\fR
+Look up a specific neighbor entry.
+.RE
+.SS Bond Management
+.TP
+.BI "wire bond " "name [action] [options]"
+Manage bond interfaces for link aggregation.
+.RS
+.TP
+.B create mode \fImode\fR [miimon \fIms\fR] [lacp_rate fast|slow] [xmit_hash_policy \fIpolicy\fR]
+Create a bond interface. Modes: balance-rr, active-backup, balance-xor,
+broadcast, 802.3ad, balance-tlb, balance-alb.
+.TP
+.B delete
+Delete a bond interface.
+.TP
+.B add \fImember\fR [\fImember\fR ...]
+Add member interfaces to the bond.
+.TP
+.B remove \fImember\fR
+Remove a member interface from the bond.
+.TP
+.B show
+Display bond information.
+.RE
+.SS Bridge Management
+.TP
+.BI "wire bridge " "name [action] [options]"
+Manage bridge interfaces.
+.RS
+.TP
+.B create [stp on|off]
+Create a bridge interface.
+.TP
+.B delete
+Delete a bridge interface.
+.TP
+.B add \fIport\fR [\fIport\fR ...]
+Add port interfaces to the bridge.
+.TP
+.B remove \fIport\fR
+Remove a port from the bridge.
+.TP
+.B fdb [show]
+Display the forwarding database.
+.TP
+.B show
+Display bridge information.
+.RE
+.SS VLAN Management
+.TP
+.BI "wire vlan " "[action] [options]"
+Manage VLAN interfaces.
+.RS
+.TP
+.B create \fIname\fR id \fIvlan-id\fR on \fIparent\fR
+Create a VLAN interface.
+.TP
+.B delete \fIname\fR
+Delete a VLAN interface.
+.TP
+.B show [\fIname\fR]
+Display VLAN information.
+.RE
+.SS Virtual Ethernet Pairs
+.TP
+.BI "wire veth " "[action] [options]"
+Manage virtual ethernet pairs.
+.RS
+.TP
+.B peer \fIname1\fR \fIname2\fR
+Create a veth pair.
+.TP
+.B delete \fIname\fR
+Delete a veth interface.
+.TP
+.B show [\fIname\fR]
+Display veth information.
+.TP
+.B netns \fIname\fR \fInamespace\fR
+Move a veth endpoint to a network namespace.
+.RE
+.SS Tunnel Management
+.TP
+.BI "wire tunnel " "type name [options]"
+Manage tunnel interfaces.
+.RS
+.TP
+.B vxlan \fIname\fR vni \fIid\fR local \fIip\fR [group \fImcast\fR] [port \fInum\fR] [learning|nolearning]
+Create a VXLAN tunnel.
+.TP
+.B gre \fIname\fR local \fIip\fR remote \fIip\fR [key \fIvalue\fR] [ttl \fIvalue\fR]
+Create a GRE tunnel.
+.TP
+.B gretap \fIname\fR local \fIip\fR remote \fIip\fR [key \fIvalue\fR]
+Create a GRE TAP tunnel (L2).
+.TP
+.B geneve \fIname\fR id \fIvni\fR remote \fIip\fR [port \fInum\fR]
+Create a GENEVE tunnel.
+.TP
+.B ipip \fIname\fR local \fIip\fR remote \fIip\fR
+Create an IP-in-IP tunnel.
+.TP
+.B sit \fIname\fR local \fIip\fR remote \fIip\fR
+Create a SIT tunnel (IPv6 over IPv4).
+.TP
+.B wireguard \fIname\fR
+Create a WireGuard interface.
+.TP
+.B delete \fIname\fR
+Delete a tunnel interface.
+.RE
+.SS Policy Routing Rules
+.TP
+.BI "wire rule " "[action] [options]"
+Manage IP policy routing rules.
+.RS
+.TP
+.B show
+Display routing rules.
+.TP
+.B add from \fIprefix\fR [to \fIprefix\fR] [table \fItable\fR] [prio \fInum\fR]
+Add a routing rule.
+.TP
+.B add fwmark \fImark\fR table \fItable\fR [prio \fInum\fR]
+Add a firewall mark based rule.
+.TP
+.B del prio \fInum\fR
+Delete a routing rule by priority.
+.RE
+.SS Network Namespaces
+.TP
+.BI "wire netns " "[action] [options]"
+Manage network namespaces.
+.RS
+.TP
+.B list
+List all network namespaces.
+.TP
+.B add|create \fIname\fR
+Create a network namespace.
+.TP
+.B del|delete \fIname\fR
+Delete a network namespace.
+.TP
+.B exec \fIname\fR \fIcommand\fR [\fIargs\fR ...]
+Execute a command in a namespace.
+.TP
+.B set \fIinterface\fR \fInamespace\fR
+Move an interface to a namespace.
+.RE
+.SS Traffic Control
+.TP
+.BI "wire tc " "interface [action] [options]"
+Manage traffic control queuing disciplines.
+.RS
+.TP
+.B show
+Display qdiscs on the interface.
+.TP
+.B add \fIqdisc-type\fR [parameters]
+Add a qdisc. Types: pfifo, fq_codel, tbf, htb.
+.TP
+.B del
+Delete a qdisc.
+.TP
+.B class show|add|del
+Manage traffic classes (for classful qdiscs).
+.TP
+.B filter show|add|del
+Manage traffic filters.
+.RE
+.SS Hardware Settings
+.TP
+.BI "wire hw " "interface [action] [options]"
+Hardware tuning via ethtool operations.
+.RS
+.TP
+.B show
+Display hardware information.
+.TP
+.B ring set rx|tx \fIvalue\fR
+Set ring buffer size.
+.TP
+.B coalesce set rx|tx \fIvalue\fR
+Set interrupt coalescing.
+.RE
+.SS Topology and Diagnostics
+.TP
+.BI "wire topology " "[action]"
+Display network topology.
+.RS
+.TP
+.B show
+Display interface hierarchy and relationships.
+.TP
+.B path \fIsrc\fR to \fIdst\fR
+Show path between interfaces.
+.TP
+.B children \fIinterface\fR
+Show child interfaces.
+.RE
+.TP
+.BI "wire trace " "interface to destination"
+Trace the network path to a destination.
+.TP
+.BI "wire probe " "host port"
+Test TCP connectivity to a service.
+.TP
+.BI "wire diagnose " "[action]"
+Network diagnostics.
+.RS
+.TP
+.B ping \fItarget\fR
+Ping test.
+.TP
+.B capture \fIinterface\fR
+Packet capture.
+.RE
+.SS Monitoring
+.TP
+.BI "wire watch " "host port [options]"
+Continuous connectivity monitoring.
+.RS
+.TP
+.B \-i, \-\-interval \fIms\fR
+Check interval in milliseconds.
+.TP
+.B \-t, \-\-timeout \fIms\fR
+Connection timeout.
+.TP
+.B \-a, \-\-alert \fIms\fR
+Alert threshold for latency.
+.RE
+.TP
+.BI "wire events"
+Monitor real-time network events via netlink.
+.SS Configuration Management
+.TP
+.BI "wire apply " "config-file [options]"
+Apply a configuration file.
+.RS
+.TP
+.B \-\-dry-run
+Show changes without applying.
+.TP
+.B \-\-force
+Force apply despite errors.
+.TP
+.B \-\-strict
+Fail on warnings.
+.TP
+.B \-\-staging
+Relaxed validation for staging environments.
+.TP
+.B \-y
+Auto-confirm prompts.
+.RE
+.TP
+.BI "wire validate " "[type] [target]"
+Validate configuration.
+.RS
+.TP
+.B config \fIfile\fR
+Validate a configuration file.
+.TP
+.B vlan \fIid\fR on \fIinterface\fR
+Validate VLAN configuration.
+.TP
+.B path \fIinterface\fR to \fIdestination\fR
+Validate network path.
+.TP
+.B service \fIhost\fR \fIport\fR
+Validate service connectivity.
+.RE
+.TP
+.BI "wire diff " "[config-file]"
+Compare current state against configuration.
+.TP
+.BI "wire state export " "[options]"
+Export current network state as configuration.
+.RS
+.TP
+.B \-\-interfaces-only
+Export only interface configuration.
+.TP
+.B \-\-routes-only
+Export only routing configuration.
+.TP
+.B \-\-all
+Export complete state.
+.TP
+.B \-\-no-comments
+Omit comments in output.
+.RE
+.TP
+.BI "wire analyze " "[category]"
+Analyze network configuration for issues.
+.SS Daemon Control
+.TP
+.BI "wire daemon " "action [config-file]"
+Control the supervision daemon.
+.RS
+.TP
+.B start [\fIconfig-file\fR]
+Start the daemon with optional configuration file.
+.TP
+.B stop
+Stop the daemon.
+.TP
+.B status
+Show daemon status.
+.TP
+.B reload
+Reload configuration.
+.RE
+.SS History
+.TP
+.BI "wire history " "[action]"
+View change history and snapshots.
+.RS
+.TP
+.B show
+Show recent changes.
+.TP
+.B snapshot
+Create a state snapshot.
+.TP
+.B list
+List available snapshots.
+.TP
+.B diff
+Show differences between snapshots.
+.TP
+.B log
+Show change log.
+.RE
+.SH CONFIGURATION FILES
+.B wire
+reads configuration from:
+.TP
+.I /etc/wire/network.conf
+Main configuration file.
+.TP
+.I /etc/wire/conf.d/*.conf
+Additional configuration files (processed in alphabetical order).
+.PP
+Configuration files use the same syntax as CLI commands, one statement per line.
+Comments start with \fB#\fR.
+.PP
+Example configuration:
+.PP
+.RS
+.nf
+# Main interface
+interface eth0 address 10.0.0.1/24
+interface eth0 set mtu 9000
+interface eth0 state up
+
+# Bond configuration
+bond bond0 create mode 802.3ad
+bond bond0 add eth1 eth2
+
+# Default route
+route default via 10.0.0.254
+.fi
+.RE
+.SH DAEMON MODE
+When running as a daemon,
+.B wire
+continuously monitors the network state and corrects any drift from the
+desired configuration. The daemon:
+.PP
+.IP \(bu 2
+Watches for netlink events (interface changes, address changes, route updates)
+.IP \(bu 2
+Compares live state against desired configuration
+.IP \(bu 2
+Automatically corrects drift
+.IP \(bu 2
+Logs all corrections and events
+.PP
+Daemon signals:
+.TP
+.B SIGHUP
+Reload configuration file.
+.TP
+.B SIGTERM
+Graceful shutdown.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+General error.
+.TP
+.B 2
+Invalid arguments or usage error.
+.SH EXAMPLES
+.SS Basic Interface Configuration
+.PP
+Show all interfaces:
+.RS
+.nf
+wire interface show
+.fi
+.RE
+.PP
+Configure an interface:
+.RS
+.nf
+wire interface eth0 address 192.168.1.10/24
+wire interface eth0 set mtu 9000
+wire interface eth0 state up
+.fi
+.RE
+.SS Bond Configuration
+.PP
+Create an 802.3ad bond:
+.RS
+.nf
+wire bond bond0 create mode 802.3ad miimon 100 lacp_rate fast
+wire bond bond0 add eth1 eth2
+wire interface bond0 address 10.0.0.1/24
+wire interface bond0 state up
+.fi
+.RE
+.SS Bridge with VLANs
+.PP
+Create a bridge with VLAN trunking:
+.RS
+.nf
+wire bridge br0 create
+wire bridge br0 add eth3 eth4
+wire vlan create vlan100 id 100 on br0
+wire interface vlan100 address 10.100.0.1/24
+.fi
+.RE
+.SS Running as Daemon
+.PP
+Start the supervision daemon:
+.RS
+.nf
+wire daemon start /etc/wire/network.conf
+.fi
+.RE
+.PP
+Check daemon status:
+.RS
+.nf
+wire daemon status
+.fi
+.RE
+.SS Troubleshooting
+.PP
+Trace path to destination:
+.RS
+.nf
+wire trace eth0 to 10.0.0.1
+.fi
+.RE
+.PP
+Watch service connectivity:
+.RS
+.nf
+wire watch 10.0.0.1 443 --interval 5000 --alert 100
+.fi
+.RE
+.PP
+Export current state:
+.RS
+.nf
+wire state export > /etc/wire/backup.conf
+.fi
+.RE
+.SH FILES
+.TP
+.I /etc/wire/network.conf
+Default configuration file.
+.TP
+.I /etc/wire/conf.d/
+Directory for additional configuration files.
+.TP
+.I /run/wire.pid
+Daemon PID file.
+.TP
+.I /run/wire.sock
+Daemon IPC socket.
+.SH SEE ALSO
+.BR ip (8),
+.BR bridge (8),
+.BR tc (8),
+.BR ethtool (8)
+.SH AUTHORS
+Wire was developed by Este Systems as a modern, declarative alternative
+to traditional Linux network configuration tools.

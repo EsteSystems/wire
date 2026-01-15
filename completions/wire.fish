@@ -95,10 +95,13 @@ complete -c wire -n "__fish_wire_using_subcommand vlan create" -a "id on" -d "Op
 complete -c wire -n "__fish_wire_using_command veth" -a "peer delete show netns help" -d "Action"
 
 # tunnel subcommands
-complete -c wire -n "__fish_wire_using_command tunnel" -a "vxlan gre gretap delete help" -d "Type/Action"
+complete -c wire -n "__fish_wire_using_command tunnel" -a "vxlan gre gretap geneve ipip sit wireguard delete help" -d "Type/Action"
 complete -c wire -n "__fish_wire_using_subcommand tunnel vxlan" -a "vni local group port learning nolearning" -d "Option"
 complete -c wire -n "__fish_wire_using_subcommand tunnel gre" -a "local remote key ttl" -d "Option"
 complete -c wire -n "__fish_wire_using_subcommand tunnel gretap" -a "local remote key ttl" -d "Option"
+complete -c wire -n "__fish_wire_using_subcommand tunnel geneve" -a "id remote port ttl" -d "Option"
+complete -c wire -n "__fish_wire_using_subcommand tunnel ipip" -a "local remote ttl" -d "Option"
+complete -c wire -n "__fish_wire_using_subcommand tunnel sit" -a "local remote ttl" -d "Option"
 
 # rule subcommands
 complete -c wire -n "__fish_wire_using_command rule" -a "show list add del help" -d "Action"
@@ -115,8 +118,12 @@ complete -c wire -n "__fish_wire_using_subcommand netns set && test (count (comm
 
 # tc subcommands
 complete -c wire -n "__fish_wire_using_command tc" -a "(__fish_wire_interfaces) help" -d "Interface"
-complete -c wire -n "__fish_wire_using_command tc && test (count (commandline -opc)) -eq 3" -a "show add del" -d "Action"
-complete -c wire -n "__fish_wire_using_command tc && test (count (commandline -opc)) -eq 4" -a "pfifo fq_codel tbf" -d "Qdisc type"
+complete -c wire -n "__fish_wire_using_command tc && test (count (commandline -opc)) -eq 3" -a "show add del class filter" -d "Action"
+complete -c wire -n "__fish_wire_using_command tc && test (count (commandline -opc)) -eq 4 && test (commandline -opc)[4] = add" -a "pfifo fq_codel tbf htb" -d "Qdisc type"
+complete -c wire -n "__fish_wire_using_command tc && test (count (commandline -opc)) -eq 4 && test (commandline -opc)[4] = class" -a "show add del" -d "Class action"
+complete -c wire -n "__fish_wire_using_command tc && test (count (commandline -opc)) -ge 5 && test (commandline -opc)[4] = class && test (commandline -opc)[5] = add" -a "rate ceil prio" -d "Class option"
+complete -c wire -n "__fish_wire_using_command tc && test (count (commandline -opc)) -eq 4 && test (commandline -opc)[4] = filter" -a "show add del" -d "Filter action"
+complete -c wire -n "__fish_wire_using_command tc && test (count (commandline -opc)) -eq 5 && test (commandline -opc)[4] = filter && test (commandline -opc)[5] = add" -a "u32 fw" -d "Filter type"
 
 # hw subcommands
 complete -c wire -n "__fish_wire_using_command hw" -a "(__fish_wire_interfaces) help" -d "Interface"

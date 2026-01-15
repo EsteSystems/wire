@@ -1,0 +1,253 @@
+.\" wire.conf.5 - Wire Configuration File Format
+.\" Copyright (c) 2025-2026 Este Systems
+.\"
+.TH WIRE.CONF 5 "January 2026" "wire 1.0" "File Formats"
+.SH NAME
+wire.conf \- configuration file for wire network configuration tool
+.SH SYNOPSIS
+.I /etc/wire/network.conf
+.br
+.I /etc/wire/conf.d/*.conf
+.SH DESCRIPTION
+.B wire.conf
+is the configuration file for the
+.BR wire (8)
+network configuration tool. Configuration files use the same syntax as
+.B wire
+CLI commands, making it easy to copy and paste between the command line
+and configuration files.
+.PP
+Each line contains a single command. Blank lines and lines starting with
+.B #
+are ignored.
+.SH SYNTAX
+The configuration syntax follows the natural language CLI format:
+.PP
+.RS
+.I subject
+.I action
+.RI [ arguments ]
+.RI [ options ]
+.RE
+.PP
+Where:
+.TP
+.I subject
+The target object type: interface, route, bond, bridge, vlan, tunnel, rule, etc.
+.TP
+.I action
+The operation: create, delete, add, set, show, etc.
+.TP
+.I arguments
+Object-specific parameters such as names, addresses, or values.
+.TP
+.I options
+Optional modifiers like metrics, MTU values, or flags.
+.SH INTERFACE STATEMENTS
+.TP
+.BI "interface " "name " "address " "ip/prefix"
+Add an IP address to an interface.
+.TP
+.BI "interface " "name " "address del " "ip/prefix"
+Remove an IP address.
+.TP
+.BI "interface " "name " "set state " "up|down"
+Set the administrative state.
+.TP
+.BI "interface " "name " "set mtu " "value"
+Set the MTU.
+.TP
+.BI "interface " "name " "set mac " "address"
+Set the MAC address.
+.SH ROUTE STATEMENTS
+.TP
+.BI "route add " "destination " "via " "gateway"
+Add a route through a gateway.
+.TP
+.BI "route add " "destination " "dev " "interface"
+Add a directly connected route.
+.TP
+.BI "route add default via " "gateway"
+Add a default route.
+.TP
+.BI "route add " "destination " "via " "gateway " "metric " "value"
+Add a route with a specific metric.
+.SH BOND STATEMENTS
+.TP
+.BI "bond " "name " "create mode " "mode " "[miimon " "ms" "] [lacp_rate " "fast|slow" "]"
+Create a bond interface.
+.TP
+.BI "bond " "name " "add " "member " "[" "member" " ...]"
+Add members to a bond.
+.TP
+.BI "bond " "name " "delete"
+Delete a bond.
+.PP
+Supported bond modes:
+.RS
+.IP \(bu 2
+balance-rr \- Round-robin load balancing
+.IP \(bu 2
+active-backup \- Active-backup failover
+.IP \(bu 2
+balance-xor \- XOR based load balancing
+.IP \(bu 2
+broadcast \- Broadcast all traffic
+.IP \(bu 2
+802.3ad \- IEEE 802.3ad LACP
+.IP \(bu 2
+balance-tlb \- Transmit load balancing
+.IP \(bu 2
+balance-alb \- Adaptive load balancing
+.RE
+.SH BRIDGE STATEMENTS
+.TP
+.BI "bridge " "name " "create " "[stp " "on|off" "]"
+Create a bridge.
+.TP
+.BI "bridge " "name " "add " "port " "[" "port" " ...]"
+Add ports to a bridge.
+.TP
+.BI "bridge " "name " "remove " "port"
+Remove a port.
+.TP
+.BI "bridge " "name " "delete"
+Delete a bridge.
+.SH VLAN STATEMENTS
+.TP
+.BI "vlan create " "name " "id " "vlan-id " "on " "parent"
+Create a VLAN interface.
+.TP
+.BI "vlan delete " "name"
+Delete a VLAN interface.
+.SH TUNNEL STATEMENTS
+.TP
+.BI "tunnel vxlan " "name " "vni " "id " "local " "ip " "[group " "mcast" "] [port " "num" "]"
+Create a VXLAN tunnel.
+.TP
+.BI "tunnel gre " "name " "local " "ip " "remote " "ip " "[key " "value" "]"
+Create a GRE tunnel.
+.TP
+.BI "tunnel geneve " "name " "id " "vni " "remote " "ip"
+Create a GENEVE tunnel.
+.TP
+.BI "tunnel delete " "name"
+Delete a tunnel.
+.SH RULE STATEMENTS
+.TP
+.BI "rule add from " "prefix " "table " "table " "[prio " "num" "]"
+Add a policy routing rule.
+.TP
+.BI "rule add fwmark " "mark " "table " "table"
+Add a firewall mark based rule.
+.TP
+.BI "rule del prio " "num"
+Delete a rule.
+.SH NAMESPACE STATEMENTS
+.TP
+.BI "netns create " "name"
+Create a network namespace.
+.TP
+.BI "netns set " "interface " "namespace"
+Move an interface to a namespace.
+.SH DEPENDENCY ORDERING
+.B wire
+automatically determines the correct order to apply configuration statements
+based on implicit dependencies:
+.PP
+.IP 1. 4
+Physical interfaces
+.IP 2. 4
+Bonds and teams
+.IP 3. 4
+Bond/team members
+.IP 4. 4
+Bridges
+.IP 5. 4
+Bridge ports
+.IP 6. 4
+VLANs
+.IP 7. 4
+Addresses
+.IP 8. 4
+Routes
+.IP 9. 4
+Policy routing rules
+.PP
+Explicit dependencies can be specified with
+.B after
+clauses:
+.PP
+.RS
+.nf
+route 10.0.0.0/8 via 192.168.1.1 after interface eth1
+.fi
+.RE
+.SH EXAMPLES
+.SS Simple Server Configuration
+.PP
+.nf
+# /etc/wire/network.conf
+
+# Management interface
+interface eth0 address 10.0.0.10/24
+interface eth0 set mtu 1500
+interface eth0 state up
+
+# Default gateway
+route default via 10.0.0.1
+.fi
+.SS Bond with VLAN
+.PP
+.nf
+# Create an 802.3ad bond
+bond bond0 create mode 802.3ad miimon 100 lacp_rate fast
+bond bond0 add eth1 eth2
+interface bond0 state up
+
+# VLAN 100 on the bond
+vlan create vlan100 id 100 on bond0
+interface vlan100 address 10.100.0.1/24
+interface vlan100 state up
+
+# VLAN 200 on the bond
+vlan create vlan200 id 200 on bond0
+interface vlan200 address 10.200.0.1/24
+interface vlan200 state up
+.fi
+.SS Bridge for VMs
+.PP
+.nf
+# Create bridge for virtual machines
+bridge br-vms create stp off
+bridge br-vms add eth3
+
+# Bridge IP for host access
+interface br-vms address 192.168.100.1/24
+interface br-vms state up
+
+# Route to VM network
+route 192.168.100.0/24 dev br-vms
+.fi
+.SS Multi-Table Routing
+.PP
+.nf
+# Default route
+route default via 10.0.0.1
+
+# Policy routing for specific source
+rule add from 192.168.1.0/24 table 100 prio 100
+route add default via 10.0.1.1 table 100
+.fi
+.SH FILES
+.TP
+.I /etc/wire/network.conf
+Main configuration file.
+.TP
+.I /etc/wire/conf.d/*.conf
+Additional configuration files. Files are processed in alphabetical order.
+.SH SEE ALSO
+.BR wire (8)
+.SH AUTHORS
+Wire was developed by Este Systems as a modern, declarative alternative
+to traditional Linux network configuration tools.

@@ -1,0 +1,11 @@
+wire (1.0.0-1) unstable; urgency=medium
+
+  * Initial 1.0.0 release
+  * Full interface, route, bond, bridge, VLAN management
+  * Daemon mode with drift detection and correction
+  * Network namespaces and policy routing
+  * Traffic control (qdiscs) and hardware tuning
+  * Built-in diagnostics: topology, trace, probe, capture
+  * Validation and continuous monitoring
+
+ -- Este Systems <support@este.systems>  Wed, 15 Jan 2026 12:00:00 +0000

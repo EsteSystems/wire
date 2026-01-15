@@ -291,6 +291,61 @@ Press Ctrl+C to stop
 - **v0.6** - Advanced networking (namespaces, rules, tc, tunnels, ethtool) ✓
 - **v1.0** - Production ready
 
+## Installation
+
+### Binary
+
+```bash
+# Build for Linux
+zig build -Dtarget=x86_64-linux-gnu
+
+# Install binary
+sudo cp zig-out/bin/wire /usr/local/sbin/
+sudo chmod +x /usr/local/sbin/wire
+```
+
+### Man Pages
+
+```bash
+sudo cp man/man8/wire.8 /usr/share/man/man8/
+sudo cp man/man5/wire.conf.5 /usr/share/man/man5/
+sudo mandb
+```
+
+### Shell Completions
+
+**Bash:**
+```bash
+sudo cp completions/wire.bash /etc/bash_completion.d/wire
+```
+
+**Zsh:**
+```bash
+sudo cp completions/wire.zsh /usr/share/zsh/site-functions/_wire
+```
+
+**Fish:**
+```bash
+cp completions/wire.fish ~/.config/fish/completions/
+```
+
+### Systemd Service
+
+```bash
+sudo cp systemd/wire.service /etc/systemd/system/
+sudo systemctl daemon-reload
+
+# Create configuration directory
+sudo mkdir -p /etc/wire
+
+# Edit configuration
+sudo vim /etc/wire/network.conf
+
+# Enable and start daemon
+sudo systemctl enable wire
+sudo systemctl start wire
+```
+
 ## Requirements
 
 - Linux kernel 3.10+ (netlink support)

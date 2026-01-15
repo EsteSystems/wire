@@ -1,0 +1,37 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE = 1
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	zig build -Doptimize=ReleaseSafe
+
+override_dh_auto_install:
+	# Binary
+	install -D -m 0755 zig-out/bin/wire debian/wire/usr/sbin/wire
+
+	# Man pages
+	install -D -m 0644 man/man8/wire.8 debian/wire/usr/share/man/man8/wire.8
+	install -D -m 0644 man/man5/wire.conf.5 debian/wire/usr/share/man/man5/wire.conf.5
+
+	# Systemd service
+	install -D -m 0644 systemd/wire.service debian/wire/lib/systemd/system/wire.service
+
+	# Configuration directory
+	install -d -m 0755 debian/wire/etc/wire
+	install -d -m 0755 debian/wire/etc/wire/conf.d
+	install -D -m 0644 examples/simple.conf debian/wire/etc/wire/network.conf.example
+
+	# Shell completions
+	install -D -m 0644 completions/wire.bash debian/wire/usr/share/bash-completion/completions/wire
+	install -D -m 0644 completions/wire.zsh debian/wire/usr/share/zsh/vendor-completions/_wire
+	install -D -m 0644 completions/wire.fish debian/wire/usr/share/fish/vendor_completions.d/wire.fish
+
+override_dh_auto_clean:
+	rm -rf zig-out .zig-cache
+
+override_dh_auto_test:
+	# Skip tests during package build
+	true

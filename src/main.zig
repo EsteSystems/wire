@@ -35,9 +35,10 @@ const path_trace = @import("diagnostics/trace.zig");
 const probe = @import("diagnostics/probe.zig");
 const validate = @import("diagnostics/validate.zig");
 const watch = @import("diagnostics/watch.zig");
+const json_output = @import("output/json.zig");
 const linux = std.os.linux;
 
-const version = "0.6.0";
+const version = "1.0.0";
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -143,11 +144,29 @@ fn executeCommand(allocator: std.mem.Allocator, args: []const []const u8) !void 
 
 fn handleInterface(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const stdout = std.io.getStdOut().writer();
+    const use_json = json_output.hasJsonFlag(args);
+    const filtered_args = try json_output.filterJsonFlag(allocator, args);
+    defer allocator.free(filtered_args);
 
     // wire interface (list all)
-    if (args.len == 0) {
+    if (filtered_args.len == 0) {
         const interfaces = try netlink_interface.getInterfaces(allocator);
         defer allocator.free(interfaces);
+
+        if (use_json) {
+            var json = json_output.JsonOutput.init(allocator);
+            // Collect addresses for each interface
+            var addr_lists = try allocator.alloc([]const netlink_address.Address, interfaces.len);
+            defer {
+                for (addr_lists) |addrs| allocator.free(addrs);
+                allocator.free(addr_lists);
+            }
+            for (interfaces, 0..) |iface, i| {
+                addr_lists[i] = try netlink_address.getAddressesForInterface(allocator, @intCast(iface.index));
+            }
+            try json.writeInterfaces(interfaces, addr_lists);
+            return;
+        }
 
         for (interfaces) |iface| {
             const state = if (iface.isUp()) "UP" else "DOWN";
@@ -180,10 +199,10 @@ fn handleInterface(allocator: std.mem.Allocator, args: []const []const u8) !void
         return;
     }
 
-    const iface_name = args[0];
+    const iface_name = filtered_args[0];
 
     // wire interface <name> show
-    if (args.len == 1 or std.mem.eql(u8, args[1], "show")) {
+    if (filtered_args.len == 1 or std.mem.eql(u8, filtered_args[1], "show")) {
         const maybe_iface = try netlink_interface.getInterfaceByName(allocator, iface_name);
 
         if (maybe_iface) |iface| {
@@ -221,14 +240,14 @@ fn handleInterface(allocator: std.mem.Allocator, args: []const []const u8) !void
         return;
     }
 
-    const action = args[1];
+    const action = filtered_args[1];
 
     // wire interface <name> set state up|down
-    if (std.mem.eql(u8, action, "set") and args.len >= 4) {
-        const attr = args[2];
+    if (std.mem.eql(u8, action, "set") and filtered_args.len >= 4) {
+        const attr = filtered_args[2];
 
         if (std.mem.eql(u8, attr, "state")) {
-            const state_val = args[3];
+            const state_val = filtered_args[3];
             if (std.mem.eql(u8, state_val, "up")) {
                 try netlink_interface.setInterfaceState(iface_name, true);
                 try stdout.print("Interface {s} set to UP\n", .{iface_name});
@@ -239,8 +258,8 @@ fn handleInterface(allocator: std.mem.Allocator, args: []const []const u8) !void
                 try stdout.print("Invalid state: {s} (use 'up' or 'down')\n", .{state_val});
             }
         } else if (std.mem.eql(u8, attr, "mtu")) {
-            const mtu_val = std.fmt.parseInt(u32, args[3], 10) catch {
-                try stdout.print("Invalid MTU value: {s}\n", .{args[3]});
+            const mtu_val = std.fmt.parseInt(u32, filtered_args[3], 10) catch {
+                try stdout.print("Invalid MTU value: {s}\n", .{filtered_args[3]});
                 return;
             };
             try netlink_interface.setInterfaceMtu(iface_name, mtu_val);
@@ -258,8 +277,8 @@ fn handleInterface(allocator: std.mem.Allocator, args: []const []const u8) !void
     }
 
     // wire interface <name> address <ip/prefix>
-    if (std.mem.eql(u8, action, "address") and args.len >= 3) {
-        const addr_str = args[2];
+    if (std.mem.eql(u8, action, "address") and filtered_args.len >= 3) {
+        const addr_str = filtered_args[2];
 
         // Get interface index
         const maybe_iface = try netlink_interface.getInterfaceByName(allocator, iface_name);
@@ -270,8 +289,8 @@ fn handleInterface(allocator: std.mem.Allocator, args: []const []const u8) !void
         const iface = maybe_iface.?;
 
         // Check if this is a delete operation
-        if (std.mem.eql(u8, addr_str, "del") and args.len >= 4) {
-            const del_addr = args[3];
+        if (std.mem.eql(u8, addr_str, "del") and filtered_args.len >= 4) {
+            const del_addr = filtered_args[3];
             const parsed = netlink_address.parseIPv4(del_addr) catch {
                 try stdout.print("Invalid address: {s}\n", .{del_addr});
                 return;
@@ -297,15 +316,24 @@ fn handleInterface(allocator: std.mem.Allocator, args: []const []const u8) !void
 
 fn handleRoute(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const stdout = std.io.getStdOut().writer();
+    const use_json = json_output.hasJsonFlag(args);
+    const filtered_args = try json_output.filterJsonFlag(allocator, args);
+    defer allocator.free(filtered_args);
 
     // wire route show (or just 'wire route')
-    if (args.len == 0 or std.mem.eql(u8, args[0], "show")) {
+    if (filtered_args.len == 0 or std.mem.eql(u8, filtered_args[0], "show")) {
         const routes = try netlink_route.getRoutes(allocator);
         defer allocator.free(routes);
 
         // Get interfaces for name lookup
         const interfaces = try netlink_interface.getInterfaces(allocator);
         defer allocator.free(interfaces);
+
+        if (use_json) {
+            var json = json_output.JsonOutput.init(allocator);
+            try json.writeRoutes(routes, interfaces);
+            return;
+        }
 
         for (routes) |route| {
             // Skip local/broadcast routes
@@ -343,13 +371,13 @@ fn handleRoute(allocator: std.mem.Allocator, args: []const []const u8) !void {
         return;
     }
 
-    const action = args[0];
+    const action = filtered_args[0];
 
     // wire route add <dst> via <gateway>
     // wire route add <dst> dev <interface>
     // wire route add default via <gateway>
-    if (std.mem.eql(u8, action, "add") and args.len >= 2) {
-        const dst_str = args[1];
+    if (std.mem.eql(u8, action, "add") and filtered_args.len >= 2) {
+        const dst_str = filtered_args[1];
         var gateway: ?[4]u8 = null;
         var dst: ?[4]u8 = null;
         var dst_len: u8 = 0;
@@ -369,16 +397,16 @@ fn handleRoute(allocator: std.mem.Allocator, args: []const []const u8) !void {
 
         // Look for 'via' and 'dev'
         var i: usize = 2;
-        while (i < args.len) : (i += 1) {
-            if (std.mem.eql(u8, args[i], "via") and i + 1 < args.len) {
-                const gw_parsed = netlink_address.parseIPv4(args[i + 1]) catch {
-                    try stdout.print("Invalid gateway: {s}\n", .{args[i + 1]});
+        while (i < filtered_args.len) : (i += 1) {
+            if (std.mem.eql(u8, filtered_args[i], "via") and i + 1 < filtered_args.len) {
+                const gw_parsed = netlink_address.parseIPv4(filtered_args[i + 1]) catch {
+                    try stdout.print("Invalid gateway: {s}\n", .{filtered_args[i + 1]});
                     return;
                 };
                 gateway = gw_parsed.addr;
                 i += 1;
-            } else if (std.mem.eql(u8, args[i], "dev") and i + 1 < args.len) {
-                const iface_name = args[i + 1];
+            } else if (std.mem.eql(u8, filtered_args[i], "dev") and i + 1 < filtered_args.len) {
+                const iface_name = filtered_args[i + 1];
                 const maybe_iface = try netlink_interface.getInterfaceByName(allocator, iface_name);
                 if (maybe_iface == null) {
                     try stdout.print("Interface {s} not found\n", .{iface_name});
@@ -404,8 +432,8 @@ fn handleRoute(allocator: std.mem.Allocator, args: []const []const u8) !void {
     }
 
     // wire route del <dst>
-    if (std.mem.eql(u8, action, "del") and args.len >= 2) {
-        const dst_str = args[1];
+    if (std.mem.eql(u8, action, "del") and filtered_args.len >= 2) {
+        const dst_str = filtered_args[1];
         var dst: ?[4]u8 = null;
         var dst_len: u8 = 0;
 
@@ -579,33 +607,77 @@ fn handleApply(allocator: std.mem.Allocator, args: []const []const u8) !void {
 
 fn handleBond(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const stdout = std.io.getStdOut().writer();
+    const use_json = json_output.hasJsonFlag(args);
+    const filtered_args = try json_output.filterJsonFlag(allocator, args);
+    defer allocator.free(filtered_args);
 
-    if (args.len == 0) {
-        try stdout.print("Bond commands:\n", .{});
-        try stdout.print("  bond <name> create mode <mode> [options]  Create bond\n", .{});
-        try stdout.print("  bond <name> add <member>                  Add member to bond\n", .{});
-        try stdout.print("  bond <name> del <member>                  Remove member from bond\n", .{});
-        try stdout.print("  bond <name> delete                        Delete bond\n", .{});
-        try stdout.print("  bond <name> show                          Show bond details\n", .{});
-        try stdout.print("\nModes: balance-rr, active-backup, balance-xor, broadcast, 802.3ad, balance-tlb, balance-alb\n", .{});
-        try stdout.print("\nLACP options (for 802.3ad mode):\n", .{});
-        try stdout.print("  lacp_rate <slow|fast>          LACP rate (default: slow)\n", .{});
-        try stdout.print("  xmit_hash <layer2|layer3+4|layer2+3>  Hash policy (default: layer2)\n", .{});
-        try stdout.print("  ad_select <stable|bandwidth|count>    Aggregator selection (default: stable)\n", .{});
-        try stdout.print("\nExamples:\n", .{});
-        try stdout.print("  wire bond bond0 create mode 802.3ad lacp_rate fast xmit_hash layer3+4\n", .{});
+    if (filtered_args.len == 0) {
+        // wire bond [--json] - list all bonds
+        const bonds = netlink_bond.getBonds(allocator) catch |err| {
+            try stdout.print("Failed to get bonds: {}\n", .{err});
+            return;
+        };
+        defer allocator.free(bonds);
+
+        if (use_json) {
+            var json = json_output.JsonOutput.init(allocator);
+            try json.writeBonds(bonds);
+            return;
+        }
+
+        if (bonds.len == 0) {
+            try stdout.print("No bonds found.\n", .{});
+            return;
+        }
+
+        // Get interfaces to resolve member names
+        const interfaces = netlink_interface.getInterfaces(allocator) catch |err| {
+            try stdout.print("Failed to get interfaces: {}\n", .{err});
+            return;
+        };
+        defer allocator.free(interfaces);
+
+        try stdout.print("Bond interfaces:\n", .{});
+        try stdout.print("{s:<12} {s:<15} {s}\n", .{ "Name", "Mode", "Members" });
+        try stdout.print("{s:-<12} {s:-<15} {s:-<20}\n", .{ "", "", "" });
+
+        for (bonds) |bond| {
+            var members_buf: [256]u8 = undefined;
+            var members_len: usize = 0;
+            for (bond.members, 0..) |member_idx, i| {
+                if (i > 0) {
+                    members_buf[members_len] = ',';
+                    members_buf[members_len + 1] = ' ';
+                    members_len += 2;
+                }
+                // Find interface name by index
+                var name: []const u8 = "?";
+                for (interfaces) |iface| {
+                    if (iface.index == member_idx) {
+                        name = iface.getName();
+                        break;
+                    }
+                }
+                if (members_len + name.len < members_buf.len) {
+                    @memcpy(members_buf[members_len .. members_len + name.len], name);
+                    members_len += name.len;
+                }
+            }
+            const members_str = if (members_len > 0) members_buf[0..members_len] else "-";
+            try stdout.print("{s:<12} {s:<15} {s}\n", .{ bond.getName(), bond.mode.toString(), members_str });
+        }
         return;
     }
 
-    const bond_name = args[0];
+    const bond_name = filtered_args[0];
 
-    if (args.len == 1) {
+    if (filtered_args.len == 1) {
         // wire bond <name> - show bond details
         try showBondDetails(allocator, bond_name, stdout);
         return;
     }
 
-    const action = args[1];
+    const action = filtered_args[1];
 
     // wire bond <name> create mode <mode> [options]
     if (std.mem.eql(u8, action, "create")) {
@@ -613,38 +685,38 @@ fn handleBond(allocator: std.mem.Allocator, args: []const []const u8) !void {
 
         // Parse options
         var i: usize = 2;
-        while (i < args.len) : (i += 1) {
-            if (std.mem.eql(u8, args[i], "mode") and i + 1 < args.len) {
-                options.mode = netlink_bond.BondMode.fromString(args[i + 1]) orelse {
-                    try stdout.print("Invalid bond mode: {s}\n", .{args[i + 1]});
+        while (i < filtered_args.len) : (i += 1) {
+            if (std.mem.eql(u8, filtered_args[i], "mode") and i + 1 < filtered_args.len) {
+                options.mode = netlink_bond.BondMode.fromString(filtered_args[i + 1]) orelse {
+                    try stdout.print("Invalid bond mode: {s}\n", .{filtered_args[i + 1]});
                     try stdout.print("Valid modes: balance-rr, active-backup, balance-xor, broadcast, 802.3ad, balance-tlb, balance-alb\n", .{});
                     return;
                 };
                 i += 1;
-            } else if (std.mem.eql(u8, args[i], "lacp_rate") and i + 1 < args.len) {
-                options.lacp_rate = netlink_bond.LacpRate.fromString(args[i + 1]) orelse {
-                    try stdout.print("Invalid LACP rate: {s}\n", .{args[i + 1]});
+            } else if (std.mem.eql(u8, filtered_args[i], "lacp_rate") and i + 1 < filtered_args.len) {
+                options.lacp_rate = netlink_bond.LacpRate.fromString(filtered_args[i + 1]) orelse {
+                    try stdout.print("Invalid LACP rate: {s}\n", .{filtered_args[i + 1]});
                     try stdout.print("Valid rates: slow, fast\n", .{});
                     return;
                 };
                 i += 1;
-            } else if (std.mem.eql(u8, args[i], "xmit_hash") and i + 1 < args.len) {
-                options.xmit_hash_policy = netlink_bond.XmitHashPolicy.fromString(args[i + 1]) orelse {
-                    try stdout.print("Invalid xmit_hash policy: {s}\n", .{args[i + 1]});
+            } else if (std.mem.eql(u8, filtered_args[i], "xmit_hash") and i + 1 < filtered_args.len) {
+                options.xmit_hash_policy = netlink_bond.XmitHashPolicy.fromString(filtered_args[i + 1]) orelse {
+                    try stdout.print("Invalid xmit_hash policy: {s}\n", .{filtered_args[i + 1]});
                     try stdout.print("Valid policies: layer2, layer3+4, layer2+3, encap2+3, encap3+4, vlan+srcmac\n", .{});
                     return;
                 };
                 i += 1;
-            } else if (std.mem.eql(u8, args[i], "ad_select") and i + 1 < args.len) {
-                options.ad_select = netlink_bond.AdSelect.fromString(args[i + 1]) orelse {
-                    try stdout.print("Invalid ad_select: {s}\n", .{args[i + 1]});
+            } else if (std.mem.eql(u8, filtered_args[i], "ad_select") and i + 1 < filtered_args.len) {
+                options.ad_select = netlink_bond.AdSelect.fromString(filtered_args[i + 1]) orelse {
+                    try stdout.print("Invalid ad_select: {s}\n", .{filtered_args[i + 1]});
                     try stdout.print("Valid options: stable, bandwidth, count\n", .{});
                     return;
                 };
                 i += 1;
-            } else if (std.mem.eql(u8, args[i], "miimon") and i + 1 < args.len) {
-                options.miimon = std.fmt.parseInt(u32, args[i + 1], 10) catch {
-                    try stdout.print("Invalid miimon value: {s}\n", .{args[i + 1]});
+            } else if (std.mem.eql(u8, filtered_args[i], "miimon") and i + 1 < filtered_args.len) {
+                options.miimon = std.fmt.parseInt(u32, filtered_args[i + 1], 10) catch {
+                    try stdout.print("Invalid miimon value: {s}\n", .{filtered_args[i + 1]});
                     return;
                 };
                 i += 1;
@@ -682,8 +754,8 @@ fn handleBond(allocator: std.mem.Allocator, args: []const []const u8) !void {
     }
 
     // wire bond <name> add <member>
-    if (std.mem.eql(u8, action, "add") and args.len >= 3) {
-        for (args[2..]) |member| {
+    if (std.mem.eql(u8, action, "add") and filtered_args.len >= 3) {
+        for (filtered_args[2..]) |member| {
             netlink_bond.addBondMember(bond_name, member) catch |err| {
                 try stdout.print("Failed to add {s} to bond: {}\n", .{ member, err });
                 continue;
@@ -694,8 +766,8 @@ fn handleBond(allocator: std.mem.Allocator, args: []const []const u8) !void {
     }
 
     // wire bond <name> del <member>
-    if (std.mem.eql(u8, action, "del") and args.len >= 3) {
-        for (args[2..]) |member| {
+    if (std.mem.eql(u8, action, "del") and filtered_args.len >= 3) {
+        for (filtered_args[2..]) |member| {
             netlink_bond.removeBondMember(member) catch |err| {
                 try stdout.print("Failed to remove {s} from bond: {}\n", .{ member, err });
                 continue;
@@ -1864,11 +1936,14 @@ fn handleHistory(allocator: std.mem.Allocator, args: []const []const u8) !void {
 
 fn handleNeighbor(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const stdout = std.io.getStdOut().writer();
+    const use_json = json_output.hasJsonFlag(args);
+    const filtered_args = try json_output.filterJsonFlag(allocator, args);
+    defer allocator.free(filtered_args);
 
     // Default to show
     var subcommand: []const u8 = "show";
-    if (args.len > 0) {
-        subcommand = args[0];
+    if (filtered_args.len > 0) {
+        subcommand = filtered_args[0];
     }
 
     if (std.mem.eql(u8, subcommand, "show") or std.mem.eql(u8, subcommand, "list")) {
@@ -1886,10 +1961,16 @@ fn handleNeighbor(allocator: std.mem.Allocator, args: []const []const u8) !void 
         };
         defer allocator.free(interfaces);
 
+        if (use_json) {
+            var json = json_output.JsonOutput.init(allocator);
+            try json.writeNeighbors(neighbors, interfaces);
+            return;
+        }
+
         // Filter by interface name if provided
         var filter_name: ?[]const u8 = null;
-        if (args.len > 1) {
-            filter_name = args[1];
+        if (filtered_args.len > 1) {
+            filter_name = filtered_args[1];
         }
 
         var filter_index: ?i32 = null;
@@ -2095,10 +2176,13 @@ fn handleNeighbor(allocator: std.mem.Allocator, args: []const []const u8) !void 
 
 fn handleRule(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const stdout = std.io.getStdOut().writer();
+    const use_json = json_output.hasJsonFlag(args);
+    const filtered_args = try json_output.filterJsonFlag(allocator, args);
+    defer allocator.free(filtered_args);
 
     var subcommand: []const u8 = "show";
-    if (args.len > 0) {
-        subcommand = args[0];
+    if (filtered_args.len > 0) {
+        subcommand = filtered_args[0];
     }
 
     if (std.mem.eql(u8, subcommand, "show") or std.mem.eql(u8, subcommand, "list")) {
@@ -2108,6 +2192,12 @@ fn handleRule(allocator: std.mem.Allocator, args: []const []const u8) !void {
             return;
         };
         defer allocator.free(rules);
+
+        if (use_json) {
+            var json = json_output.JsonOutput.init(allocator);
+            try json.writeRules(rules);
+            return;
+        }
 
         if (rules.len == 0) {
             try stdout.print("No IP rules found.\n", .{});
@@ -2161,7 +2251,7 @@ fn handleRule(allocator: std.mem.Allocator, args: []const []const u8) !void {
     } else if (std.mem.eql(u8, subcommand, "add")) {
         // wire rule add from <prefix> table <table> [prio <priority>]
         // wire rule add fwmark <mark> table <table> [prio <priority>]
-        if (args.len < 4) {
+        if (filtered_args.len < 4) {
             try stdout.print("Usage:\n", .{});
             try stdout.print("  wire rule add from <prefix> table <table> [prio <n>]\n", .{});
             try stdout.print("  wire rule add fwmark <mark> table <table> [prio <n>]\n", .{});
@@ -2178,26 +2268,26 @@ fn handleRule(allocator: std.mem.Allocator, args: []const []const u8) !void {
 
         // Parse arguments
         var i: usize = 1;
-        while (i < args.len) : (i += 1) {
-            if (std.mem.eql(u8, args[i], "from") and i + 1 < args.len) {
-                const prefix = ip_rule.parsePrefix(args[i + 1]) orelse {
-                    try stdout.print("Invalid source prefix: {s}\n", .{args[i + 1]});
+        while (i < filtered_args.len) : (i += 1) {
+            if (std.mem.eql(u8, filtered_args[i], "from") and i + 1 < filtered_args.len) {
+                const prefix = ip_rule.parsePrefix(filtered_args[i + 1]) orelse {
+                    try stdout.print("Invalid source prefix: {s}\n", .{filtered_args[i + 1]});
                     return;
                 };
                 @memcpy(options.src[0..4], &prefix.addr);
                 options.src_len = prefix.len;
                 i += 1;
-            } else if (std.mem.eql(u8, args[i], "to") and i + 1 < args.len) {
-                const prefix = ip_rule.parsePrefix(args[i + 1]) orelse {
-                    try stdout.print("Invalid destination prefix: {s}\n", .{args[i + 1]});
+            } else if (std.mem.eql(u8, filtered_args[i], "to") and i + 1 < filtered_args.len) {
+                const prefix = ip_rule.parsePrefix(filtered_args[i + 1]) orelse {
+                    try stdout.print("Invalid destination prefix: {s}\n", .{filtered_args[i + 1]});
                     return;
                 };
                 @memcpy(options.dst[0..4], &prefix.addr);
                 options.dst_len = prefix.len;
                 i += 1;
-            } else if (std.mem.eql(u8, args[i], "table") and i + 1 < args.len) {
+            } else if (std.mem.eql(u8, filtered_args[i], "table") and i + 1 < filtered_args.len) {
                 // Check for named tables
-                const table_arg = args[i + 1];
+                const table_arg = filtered_args[i + 1];
                 table = if (std.mem.eql(u8, table_arg, "main"))
                     ip_rule.RT_TABLE.MAIN
                 else if (std.mem.eql(u8, table_arg, "local"))
@@ -2210,14 +2300,14 @@ fn handleRule(allocator: std.mem.Allocator, args: []const []const u8) !void {
                         return;
                     };
                 i += 1;
-            } else if (std.mem.eql(u8, args[i], "prio") and i + 1 < args.len) {
-                priority = std.fmt.parseInt(u32, args[i + 1], 10) catch {
-                    try stdout.print("Invalid priority: {s}\n", .{args[i + 1]});
+            } else if (std.mem.eql(u8, filtered_args[i], "prio") and i + 1 < filtered_args.len) {
+                priority = std.fmt.parseInt(u32, filtered_args[i + 1], 10) catch {
+                    try stdout.print("Invalid priority: {s}\n", .{filtered_args[i + 1]});
                     return;
                 };
                 i += 1;
-            } else if (std.mem.eql(u8, args[i], "fwmark") and i + 1 < args.len) {
-                const mark_str = args[i + 1];
+            } else if (std.mem.eql(u8, filtered_args[i], "fwmark") and i + 1 < filtered_args.len) {
+                const mark_str = filtered_args[i + 1];
                 // Support hex (0x...) or decimal
                 options.fwmark = if (mark_str.len > 2 and std.mem.eql(u8, mark_str[0..2], "0x"))
                     std.fmt.parseInt(u32, mark_str[2..], 16) catch {
@@ -2230,23 +2320,23 @@ fn handleRule(allocator: std.mem.Allocator, args: []const []const u8) !void {
                         return;
                     };
                 i += 1;
-            } else if (std.mem.eql(u8, args[i], "iif") and i + 1 < args.len) {
-                const name = args[i + 1];
+            } else if (std.mem.eql(u8, filtered_args[i], "iif") and i + 1 < filtered_args.len) {
+                const name = filtered_args[i + 1];
                 const copy_len = @min(name.len, options.iifname.len);
                 @memcpy(options.iifname[0..copy_len], name[0..copy_len]);
                 options.iifname_len = copy_len;
                 i += 1;
-            } else if (std.mem.eql(u8, args[i], "oif") and i + 1 < args.len) {
-                const name = args[i + 1];
+            } else if (std.mem.eql(u8, filtered_args[i], "oif") and i + 1 < filtered_args.len) {
+                const name = filtered_args[i + 1];
                 const copy_len = @min(name.len, options.oifname.len);
                 @memcpy(options.oifname[0..copy_len], name[0..copy_len]);
                 options.oifname_len = copy_len;
                 i += 1;
-            } else if (std.mem.eql(u8, args[i], "blackhole")) {
+            } else if (std.mem.eql(u8, filtered_args[i], "blackhole")) {
                 options.action = ip_rule.FR_ACT.BLACKHOLE;
-            } else if (std.mem.eql(u8, args[i], "unreachable")) {
+            } else if (std.mem.eql(u8, filtered_args[i], "unreachable")) {
                 options.action = ip_rule.FR_ACT.UNREACHABLE;
-            } else if (std.mem.eql(u8, args[i], "prohibit")) {
+            } else if (std.mem.eql(u8, filtered_args[i], "prohibit")) {
                 options.action = ip_rule.FR_ACT.PROHIBIT;
             }
         }
@@ -2259,14 +2349,14 @@ fn handleRule(allocator: std.mem.Allocator, args: []const []const u8) !void {
         try stdout.print("Added rule: prio {d} table {d}\n", .{ priority, table });
     } else if (std.mem.eql(u8, subcommand, "del") or std.mem.eql(u8, subcommand, "delete")) {
         // wire rule del <priority>
-        if (args.len < 2) {
+        if (filtered_args.len < 2) {
             try stdout.print("Usage: wire rule del <priority>\n", .{});
             try stdout.print("Example: wire rule del 100\n", .{});
             return;
         }
 
-        const priority = std.fmt.parseInt(u32, args[1], 10) catch {
-            try stdout.print("Invalid priority: {s}\n", .{args[1]});
+        const priority = std.fmt.parseInt(u32, filtered_args[1], 10) catch {
+            try stdout.print("Invalid priority: {s}\n", .{filtered_args[1]});
             return;
         };
 
@@ -3055,8 +3145,11 @@ fn handleTunnel(args: []const []const u8) !void {
 
 fn handleTc(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const stdout = std.io.getStdOut().writer();
+    const use_json = json_output.hasJsonFlag(args);
+    const filtered_args = try json_output.filterJsonFlag(allocator, args);
+    defer allocator.free(filtered_args);
 
-    if (args.len < 1) {
+    if (filtered_args.len < 1) {
         try stdout.print("Usage: wire tc <interface> [show|add|del|class|filter]\n", .{});
         try stdout.print("\nQdisc Commands:\n", .{});
         try stdout.print("  wire tc <interface>                      Show qdiscs\n", .{});
@@ -3081,7 +3174,7 @@ fn handleTc(allocator: std.mem.Allocator, args: []const []const u8) !void {
         return;
     }
 
-    const iface_name = args[0];
+    const iface_name = filtered_args[0];
 
     if (std.mem.eql(u8, iface_name, "help")) {
         try stdout.print("Traffic Control (tc) commands:\n", .{});
@@ -3120,8 +3213,8 @@ fn handleTc(allocator: std.mem.Allocator, args: []const []const u8) !void {
 
     // Default to show
     var subcommand: []const u8 = "show";
-    if (args.len > 1) {
-        subcommand = args[1];
+    if (filtered_args.len > 1) {
+        subcommand = filtered_args[1];
     }
 
     if (std.mem.eql(u8, subcommand, "show")) {
@@ -3131,6 +3224,12 @@ fn handleTc(allocator: std.mem.Allocator, args: []const []const u8) !void {
             return;
         };
         defer allocator.free(qdiscs);
+
+        if (use_json) {
+            var json = json_output.JsonOutput.init(allocator);
+            try json.writeQdiscs(qdiscs);
+            return;
+        }
 
         if (qdiscs.len == 0) {
             try stdout.print("No qdiscs found on {s}\n", .{iface_name});
@@ -3155,22 +3254,22 @@ fn handleTc(allocator: std.mem.Allocator, args: []const []const u8) !void {
         }
     } else if (std.mem.eql(u8, subcommand, "add")) {
         // wire tc <interface> add <type> [options]
-        if (args.len < 3) {
+        if (filtered_args.len < 3) {
             try stdout.print("Usage: wire tc <interface> add <type> [options]\n", .{});
             try stdout.print("Types: pfifo, fq_codel, tbf, htb\n", .{});
             return;
         }
 
-        const qdisc_type = args[2];
+        const qdisc_type = filtered_args[2];
 
         if (std.mem.eql(u8, qdisc_type, "pfifo")) {
             // wire tc <interface> add pfifo [limit <n>]
             var limit: ?u32 = null;
             var i: usize = 3;
-            while (i < args.len) : (i += 1) {
-                if (std.mem.eql(u8, args[i], "limit") and i + 1 < args.len) {
-                    limit = std.fmt.parseInt(u32, args[i + 1], 10) catch {
-                        try stdout.print("Invalid limit: {s}\n", .{args[i + 1]});
+            while (i < filtered_args.len) : (i += 1) {
+                if (std.mem.eql(u8, filtered_args[i], "limit") and i + 1 < filtered_args.len) {
+                    limit = std.fmt.parseInt(u32, filtered_args[i + 1], 10) catch {
+                        try stdout.print("Invalid limit: {s}\n", .{filtered_args[i + 1]});
                         return;
                     };
                     i += 1;
@@ -3198,22 +3297,22 @@ fn handleTc(allocator: std.mem.Allocator, args: []const []const u8) !void {
             var latency_us: u32 = 50000; // 50ms default
 
             var i: usize = 3;
-            while (i < args.len) : (i += 1) {
-                if (std.mem.eql(u8, args[i], "rate") and i + 1 < args.len) {
-                    rate_bps = parseRate(args[i + 1]) orelse {
-                        try stdout.print("Invalid rate: {s}\n", .{args[i + 1]});
+            while (i < filtered_args.len) : (i += 1) {
+                if (std.mem.eql(u8, filtered_args[i], "rate") and i + 1 < filtered_args.len) {
+                    rate_bps = parseRate(filtered_args[i + 1]) orelse {
+                        try stdout.print("Invalid rate: {s}\n", .{filtered_args[i + 1]});
                         return;
                     };
                     i += 1;
-                } else if (std.mem.eql(u8, args[i], "burst") and i + 1 < args.len) {
-                    burst = parseSize(args[i + 1]) orelse {
-                        try stdout.print("Invalid burst: {s}\n", .{args[i + 1]});
+                } else if (std.mem.eql(u8, filtered_args[i], "burst") and i + 1 < filtered_args.len) {
+                    burst = parseSize(filtered_args[i + 1]) orelse {
+                        try stdout.print("Invalid burst: {s}\n", .{filtered_args[i + 1]});
                         return;
                     };
                     i += 1;
-                } else if (std.mem.eql(u8, args[i], "latency") and i + 1 < args.len) {
-                    latency_us = std.fmt.parseInt(u32, args[i + 1], 10) catch {
-                        try stdout.print("Invalid latency: {s}\n", .{args[i + 1]});
+                } else if (std.mem.eql(u8, filtered_args[i], "latency") and i + 1 < filtered_args.len) {
+                    latency_us = std.fmt.parseInt(u32, filtered_args[i + 1], 10) catch {
+                        try stdout.print("Invalid latency: {s}\n", .{filtered_args[i + 1]});
                         return;
                     };
                     i += 1;
@@ -3237,10 +3336,10 @@ fn handleTc(allocator: std.mem.Allocator, args: []const []const u8) !void {
             var default_class: ?u32 = null;
 
             var i: usize = 3;
-            while (i < args.len) : (i += 1) {
-                if (std.mem.eql(u8, args[i], "default") and i + 1 < args.len) {
-                    default_class = std.fmt.parseInt(u32, args[i + 1], 10) catch {
-                        try stdout.print("Invalid default class: {s}\n", .{args[i + 1]});
+            while (i < filtered_args.len) : (i += 1) {
+                if (std.mem.eql(u8, filtered_args[i], "default") and i + 1 < filtered_args.len) {
+                    default_class = std.fmt.parseInt(u32, filtered_args[i + 1], 10) catch {
+                        try stdout.print("Invalid default class: {s}\n", .{filtered_args[i + 1]});
                         return;
                     };
                     i += 1;
@@ -3272,8 +3371,8 @@ fn handleTc(allocator: std.mem.Allocator, args: []const []const u8) !void {
     } else if (std.mem.eql(u8, subcommand, "class")) {
         // wire tc <interface> class [show|add|del]
         var class_cmd: []const u8 = "show";
-        if (args.len > 2) {
-            class_cmd = args[2];
+        if (filtered_args.len > 2) {
+            class_cmd = filtered_args[2];
         }
 
         if (std.mem.eql(u8, class_cmd, "show")) {
@@ -3307,7 +3406,7 @@ fn handleTc(allocator: std.mem.Allocator, args: []const []const u8) !void {
             }
         } else if (std.mem.eql(u8, class_cmd, "add")) {
             // wire tc <interface> class add <classid> rate <rate> [ceil <rate>] [prio <n>]
-            if (args.len < 6) {
+            if (filtered_args.len < 6) {
                 try stdout.print("Usage: wire tc <interface> class add <classid> rate <rate> [ceil <rate>] [prio <n>]\n", .{});
                 try stdout.print("\nOptions:\n", .{});
                 try stdout.print("  classid   Class ID in format major:minor (e.g., 1:10)\n", .{});
@@ -3319,7 +3418,7 @@ fn handleTc(allocator: std.mem.Allocator, args: []const []const u8) !void {
                 return;
             }
 
-            const classid_str = args[3];
+            const classid_str = filtered_args[3];
             const classid = parseClassId(classid_str) orelse {
                 try stdout.print("Invalid class ID: {s}\n", .{classid_str});
                 try stdout.print("Expected format: major:minor (e.g., 1:10)\n", .{});
@@ -3332,28 +3431,28 @@ fn handleTc(allocator: std.mem.Allocator, args: []const []const u8) !void {
             var parent = qdisc.TC_H.make(1, 0); // Default parent is root qdisc 1:0
 
             var i: usize = 4;
-            while (i < args.len) : (i += 1) {
-                if (std.mem.eql(u8, args[i], "rate") and i + 1 < args.len) {
-                    rate_bps = parseRate(args[i + 1]) orelse {
-                        try stdout.print("Invalid rate: {s}\n", .{args[i + 1]});
+            while (i < filtered_args.len) : (i += 1) {
+                if (std.mem.eql(u8, filtered_args[i], "rate") and i + 1 < filtered_args.len) {
+                    rate_bps = parseRate(filtered_args[i + 1]) orelse {
+                        try stdout.print("Invalid rate: {s}\n", .{filtered_args[i + 1]});
                         return;
                     };
                     i += 1;
-                } else if (std.mem.eql(u8, args[i], "ceil") and i + 1 < args.len) {
-                    ceil_bps = parseRate(args[i + 1]) orelse {
-                        try stdout.print("Invalid ceil: {s}\n", .{args[i + 1]});
+                } else if (std.mem.eql(u8, filtered_args[i], "ceil") and i + 1 < filtered_args.len) {
+                    ceil_bps = parseRate(filtered_args[i + 1]) orelse {
+                        try stdout.print("Invalid ceil: {s}\n", .{filtered_args[i + 1]});
                         return;
                     };
                     i += 1;
-                } else if (std.mem.eql(u8, args[i], "prio") and i + 1 < args.len) {
-                    prio = std.fmt.parseInt(u32, args[i + 1], 10) catch {
-                        try stdout.print("Invalid priority: {s}\n", .{args[i + 1]});
+                } else if (std.mem.eql(u8, filtered_args[i], "prio") and i + 1 < filtered_args.len) {
+                    prio = std.fmt.parseInt(u32, filtered_args[i + 1], 10) catch {
+                        try stdout.print("Invalid priority: {s}\n", .{filtered_args[i + 1]});
                         return;
                     };
                     i += 1;
-                } else if (std.mem.eql(u8, args[i], "parent") and i + 1 < args.len) {
-                    parent = parseClassId(args[i + 1]) orelse {
-                        try stdout.print("Invalid parent: {s}\n", .{args[i + 1]});
+                } else if (std.mem.eql(u8, filtered_args[i], "parent") and i + 1 < filtered_args.len) {
+                    parent = parseClassId(filtered_args[i + 1]) orelse {
+                        try stdout.print("Invalid parent: {s}\n", .{filtered_args[i + 1]});
                         return;
                     };
                     i += 1;
@@ -3376,13 +3475,13 @@ fn handleTc(allocator: std.mem.Allocator, args: []const []const u8) !void {
             try stdout.print("Added HTB class {d}:{d} on {s} (rate {d} bps)\n", .{ major, minor, iface_name, rate_bps.? });
         } else if (std.mem.eql(u8, class_cmd, "del") or std.mem.eql(u8, class_cmd, "delete")) {
             // wire tc <interface> class del <classid>
-            if (args.len < 4) {
+            if (filtered_args.len < 4) {
                 try stdout.print("Usage: wire tc <interface> class del <classid>\n", .{});
                 try stdout.print("Example: wire tc eth0 class del 1:10\n", .{});
                 return;
             }
 
-            const classid_str = args[3];
+            const classid_str = filtered_args[3];
             const classid = parseClassId(classid_str) orelse {
                 try stdout.print("Invalid class ID: {s}\n", .{classid_str});
                 try stdout.print("Expected format: major:minor (e.g., 1:10)\n", .{});
@@ -3404,8 +3503,8 @@ fn handleTc(allocator: std.mem.Allocator, args: []const []const u8) !void {
     } else if (std.mem.eql(u8, subcommand, "filter")) {
         // wire tc <interface> filter [show|add|del]
         var filter_cmd: []const u8 = "show";
-        if (args.len > 2) {
-            filter_cmd = args[2];
+        if (filtered_args.len > 2) {
+            filter_cmd = filtered_args[2];
         }
 
         if (std.mem.eql(u8, filter_cmd, "show")) {
@@ -3449,7 +3548,7 @@ fn handleTc(allocator: std.mem.Allocator, args: []const []const u8) !void {
             }
         } else if (std.mem.eql(u8, filter_cmd, "add")) {
             // wire tc <interface> filter add <type> ...
-            if (args.len < 4) {
+            if (filtered_args.len < 4) {
                 try stdout.print("Usage: wire tc <interface> filter add <type> [options]\n", .{});
                 try stdout.print("\nFilter types:\n", .{});
                 try stdout.print("  u32 match ip dst <ip/mask> flowid <classid> [prio <n>]\n", .{});
@@ -3460,7 +3559,7 @@ fn handleTc(allocator: std.mem.Allocator, args: []const []const u8) !void {
                 return;
             }
 
-            const filter_type = args[3];
+            const filter_type = filtered_args[3];
 
             if (std.mem.eql(u8, filter_type, "u32")) {
                 // wire tc <interface> filter add u32 match ip dst <ip/mask> flowid <classid>
@@ -3470,28 +3569,28 @@ fn handleTc(allocator: std.mem.Allocator, args: []const []const u8) !void {
                 var prio: u16 = 1;
 
                 var i: usize = 4;
-                while (i < args.len) : (i += 1) {
-                    if (std.mem.eql(u8, args[i], "match") and i + 4 < args.len) {
-                        if (std.mem.eql(u8, args[i + 1], "ip") and std.mem.eql(u8, args[i + 2], "dst")) {
-                            const ip_mask = parseIPWithMask(args[i + 3]);
+                while (i < filtered_args.len) : (i += 1) {
+                    if (std.mem.eql(u8, filtered_args[i], "match") and i + 4 < filtered_args.len) {
+                        if (std.mem.eql(u8, filtered_args[i + 1], "ip") and std.mem.eql(u8, filtered_args[i + 2], "dst")) {
+                            const ip_mask = parseIPWithMask(filtered_args[i + 3]);
                             if (ip_mask) |im| {
                                 dst_ip = im.ip;
                                 dst_mask = im.mask;
                             } else {
-                                try stdout.print("Invalid IP/mask: {s}\n", .{args[i + 3]});
+                                try stdout.print("Invalid IP/mask: {s}\n", .{filtered_args[i + 3]});
                                 return;
                             }
                             i += 3;
                         }
-                    } else if (std.mem.eql(u8, args[i], "flowid") and i + 1 < args.len) {
-                        flowid = parseClassId(args[i + 1]) orelse {
-                            try stdout.print("Invalid flowid: {s}\n", .{args[i + 1]});
+                    } else if (std.mem.eql(u8, filtered_args[i], "flowid") and i + 1 < filtered_args.len) {
+                        flowid = parseClassId(filtered_args[i + 1]) orelse {
+                            try stdout.print("Invalid flowid: {s}\n", .{filtered_args[i + 1]});
                             return;
                         };
                         i += 1;
-                    } else if (std.mem.eql(u8, args[i], "prio") and i + 1 < args.len) {
-                        prio = std.fmt.parseInt(u16, args[i + 1], 10) catch {
-                            try stdout.print("Invalid priority: {s}\n", .{args[i + 1]});
+                    } else if (std.mem.eql(u8, filtered_args[i], "prio") and i + 1 < filtered_args.len) {
+                        prio = std.fmt.parseInt(u16, filtered_args[i + 1], 10) catch {
+                            try stdout.print("Invalid priority: {s}\n", .{filtered_args[i + 1]});
                             return;
                         };
                         i += 1;
@@ -3519,9 +3618,9 @@ fn handleTc(allocator: std.mem.Allocator, args: []const []const u8) !void {
                 var prio: u16 = 1;
 
                 var i: usize = 4;
-                while (i < args.len) : (i += 1) {
-                    if (std.mem.eql(u8, args[i], "handle") and i + 1 < args.len) {
-                        const mark_str = args[i + 1];
+                while (i < filtered_args.len) : (i += 1) {
+                    if (std.mem.eql(u8, filtered_args[i], "handle") and i + 1 < filtered_args.len) {
+                        const mark_str = filtered_args[i + 1];
                         fwmark = if (mark_str.len > 2 and std.mem.eql(u8, mark_str[0..2], "0x"))
                             std.fmt.parseInt(u32, mark_str[2..], 16) catch {
                                 try stdout.print("Invalid handle: {s}\n", .{mark_str});
@@ -3533,15 +3632,15 @@ fn handleTc(allocator: std.mem.Allocator, args: []const []const u8) !void {
                                 return;
                             };
                         i += 1;
-                    } else if (std.mem.eql(u8, args[i], "classid") and i + 1 < args.len) {
-                        classid = parseClassId(args[i + 1]) orelse {
-                            try stdout.print("Invalid classid: {s}\n", .{args[i + 1]});
+                    } else if (std.mem.eql(u8, filtered_args[i], "classid") and i + 1 < filtered_args.len) {
+                        classid = parseClassId(filtered_args[i + 1]) orelse {
+                            try stdout.print("Invalid classid: {s}\n", .{filtered_args[i + 1]});
                             return;
                         };
                         i += 1;
-                    } else if (std.mem.eql(u8, args[i], "prio") and i + 1 < args.len) {
-                        prio = std.fmt.parseInt(u16, args[i + 1], 10) catch {
-                            try stdout.print("Invalid priority: {s}\n", .{args[i + 1]});
+                    } else if (std.mem.eql(u8, filtered_args[i], "prio") and i + 1 < filtered_args.len) {
+                        prio = std.fmt.parseInt(u16, filtered_args[i + 1], 10) catch {
+                            try stdout.print("Invalid priority: {s}\n", .{filtered_args[i + 1]});
                             return;
                         };
                         i += 1;
@@ -3568,7 +3667,7 @@ fn handleTc(allocator: std.mem.Allocator, args: []const []const u8) !void {
             }
         } else if (std.mem.eql(u8, filter_cmd, "del") or std.mem.eql(u8, filter_cmd, "delete")) {
             // wire tc <interface> filter del prio <n> [handle <h>]
-            if (args.len < 5) {
+            if (filtered_args.len < 5) {
                 try stdout.print("Usage: wire tc <interface> filter del prio <n> [handle <h>]\n", .{});
                 try stdout.print("Example: wire tc eth0 filter del prio 1\n", .{});
                 return;
@@ -3578,15 +3677,15 @@ fn handleTc(allocator: std.mem.Allocator, args: []const []const u8) !void {
             var handle: u32 = 0;
 
             var i: usize = 3;
-            while (i < args.len) : (i += 1) {
-                if (std.mem.eql(u8, args[i], "prio") and i + 1 < args.len) {
-                    prio = std.fmt.parseInt(u16, args[i + 1], 10) catch {
-                        try stdout.print("Invalid priority: {s}\n", .{args[i + 1]});
+            while (i < filtered_args.len) : (i += 1) {
+                if (std.mem.eql(u8, filtered_args[i], "prio") and i + 1 < filtered_args.len) {
+                    prio = std.fmt.parseInt(u16, filtered_args[i + 1], 10) catch {
+                        try stdout.print("Invalid priority: {s}\n", .{filtered_args[i + 1]});
                         return;
                     };
                     i += 1;
-                } else if (std.mem.eql(u8, args[i], "handle") and i + 1 < args.len) {
-                    const h_str = args[i + 1];
+                } else if (std.mem.eql(u8, filtered_args[i], "handle") and i + 1 < filtered_args.len) {
+                    const h_str = filtered_args[i + 1];
                     handle = if (h_str.len > 2 and std.mem.eql(u8, h_str[0..2], "0x"))
                         std.fmt.parseInt(u32, h_str[2..], 16) catch {
                             try stdout.print("Invalid handle: {s}\n", .{h_str});
