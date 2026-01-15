@@ -297,6 +297,7 @@ pub const PreApplyValidator = struct {
             .bond => |bond| try self.validateBondCommand(bond, cmd.action, cmd.attributes, index),
             .bridge => |bridge| try self.validateBridgeCommand(bridge, cmd.action, cmd.attributes, index),
             .vlan => |vlan| try self.validateVlanCommand(vlan, index),
+            .veth => {}, // Veth creation doesn't need pre-validation
             .analyze => {},
         }
     }

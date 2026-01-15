@@ -1,0 +1,104 @@
+# VM Hosting Network Topology
+# ============================
+#
+# This configuration creates a multi-segment VM hosting topology with:
+# - Bonded uplink (active-backup) from two physical interfaces
+# - Main uplink bridge connected to the bond
+# - Two isolated VM segments connected via veth pairs
+# - VLAN-based sub-segment for additional isolation
+#
+# Topology:
+#
+#                     Physical Network
+#                           |
+#                 +---------+---------+
+#                 enp0s5f1      enp0s5f2
+#                 +---------+---------+
+#                           |
+#                      +----+----+
+#                      |  bond0  |  (active-backup)
+#                      +----+----+
+#                           |
+#                    +------+------+
+#                    |  br-uplink  |  10.0.0.100/24
+#                    +------+------+
+#                           |
+#           +---------------+---------------+
+#      veth-seg1-up                    veth-seg2-up
+#           |                               |
+#      veth-seg1-br                    veth-seg2-br
+#           |                               |
+#     +-----+-----+                   +-----+-----+
+#     |  br-seg1  |                   |  br-seg2  |
+#     |10.1.0.1/24|                   |10.2.0.1/24|
+#     +-----+-----+                   +-----------+
+#           |
+#      br-seg1.100 (VLAN 100)
+#           |
+#     +-----+------+
+#     | vlan100br  |
+#     |10.100.0.1/24|
+#     +------------+
+#
+# SETUP COMMANDS (run manually or via script):
+# =============================================
+# wire bond bond0 create mode active-backup
+# wire bond bond0 add enp0s5f1 enp0s5f2
+# wire bridge br-uplink create
+# wire bridge br-uplink add bond0
+# wire bridge br-seg1 create
+# wire bridge br-seg2 create
+# wire veth veth-seg1-up peer veth-seg1-br
+# wire veth veth-seg2-up peer veth-seg2-br
+# wire bridge br-uplink add veth-seg1-up veth-seg2-up
+# wire bridge br-seg1 add veth-seg1-br
+# wire bridge br-seg2 add veth-seg2-br
+# wire vlan 100 on br-seg1
+# wire bridge vlan100br create
+# wire bridge vlan100br add br-seg1.100
+#
+# Then apply this config for interface settings:
+
+# ====================
+# Interface Configuration
+# ====================
+
+interface bond0
+  state up
+
+interface br-uplink
+  state up
+  address 10.0.0.100/24
+
+interface br-seg1
+  state up
+  address 10.1.0.1/24
+
+interface br-seg2
+  state up
+  address 10.2.0.1/24
+
+interface veth-seg1-up
+  state up
+
+interface veth-seg1-br
+  state up
+
+interface veth-seg2-up
+  state up
+
+interface veth-seg2-br
+  state up
+
+interface br-seg1.100
+  state up
+
+interface vlan100br
+  state up
+  address 10.100.0.1/24
+
+# ====================
+# Routing
+# ====================
+
+route default via 10.0.0.1

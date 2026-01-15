@@ -7,6 +7,7 @@ const netlink_route = @import("../netlink/route.zig");
 const netlink_bond = @import("../netlink/bond.zig");
 const netlink_bridge = @import("../netlink/bridge.zig");
 const netlink_vlan = @import("../netlink/vlan.zig");
+const netlink_veth = @import("../netlink/veth.zig");
 const linux = std.os.linux;
 const state_live = @import("../state/live.zig");
 const connectivity = @import("../analysis/connectivity.zig");
@@ -78,6 +79,7 @@ pub const Executor = struct {
             .bond => |bond| try self.executeBond(bond, cmd.action, cmd.attributes),
             .bridge => |bridge| try self.executeBridge(bridge, cmd.action, cmd.attributes),
             .vlan => |vlan| try self.executeVlan(vlan, cmd.action, cmd.attributes),
+            .veth => |veth| try self.executeVeth(veth, cmd.action),
         }
     }
 
@@ -199,6 +201,43 @@ pub const Executor = struct {
                         netlink_vlan.deleteVlan(vlan_name) catch return ExecuteError.NetlinkError;
                         self.stdout.print("VLAN {s} deleted\n", .{vlan_name}) catch {};
                     }
+                }
+            },
+            else => return ExecuteError.NotImplemented,
+        }
+    }
+
+    // Veth commands
+
+    fn executeVeth(
+        self: *Self,
+        veth: parser.VethSubject,
+        action: Action,
+    ) ExecuteError!void {
+        switch (action) {
+            .create, .none => {
+                const name = veth.name orelse return ExecuteError.ValidationFailed;
+                const peer = veth.peer orelse return ExecuteError.ValidationFailed;
+
+                netlink_veth.createVethPair(name, peer) catch return ExecuteError.NetlinkError;
+                self.stdout.print("Created veth pair: {s} <-> {s}\n", .{ name, peer }) catch {};
+            },
+            .delete => {
+                const name = veth.name orelse return ExecuteError.ValidationFailed;
+                netlink_veth.deleteVeth(name) catch return ExecuteError.NetlinkError;
+                self.stdout.print("Deleted veth pair: {s}\n", .{name}) catch {};
+            },
+            .show => {
+                const name = veth.name orelse return ExecuteError.ValidationFailed;
+                if (netlink_veth.getVethInfo(self.allocator, name)) |maybe_info| {
+                    if (maybe_info) |info| {
+                        self.stdout.print("Veth: {s}\n", .{name}) catch {};
+                        self.stdout.print("  Peer: {s} (index {d})\n", .{ info.getPeerName(), info.peer_index }) catch {};
+                    } else {
+                        self.stdout.print("{s}: not a veth interface\n", .{name}) catch {};
+                    }
+                } else |_| {
+                    return ExecuteError.NetlinkError;
                 }
             },
             else => return ExecuteError.NotImplemented,

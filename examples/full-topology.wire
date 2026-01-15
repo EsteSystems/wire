@@ -1,0 +1,50 @@
+# Full VM Hosting Network Topology Configuration
+# All commands in declarative config format
+
+# Bond setup - uplink bonding
+bond bond0 create mode active-backup
+bond bond0 add enp0s5f1
+bond bond0 add enp0s5f2
+
+# Bridge setup
+bridge br-uplink create
+bridge br-uplink add bond0
+
+bridge br-seg1 create
+bridge br-seg2 create
+
+# Veth pairs for segment isolation
+veth veth-seg1-up peer veth-seg1-br
+veth veth-seg2-up peer veth-seg2-br
+
+# Connect veth pairs to bridges
+bridge br-uplink add veth-seg1-up
+bridge br-uplink add veth-seg2-up
+bridge br-seg1 add veth-seg1-br
+bridge br-seg2 add veth-seg2-br
+
+# VLAN on segment 1
+vlan 100 on br-seg1
+
+# VLAN bridge
+bridge vlan100br create
+bridge vlan100br add br-seg1.100
+
+# Interface state and addresses
+interface bond0 set state up
+interface br-uplink set state up
+interface br-uplink add 10.0.0.100/24
+interface br-seg1 set state up
+interface br-seg1 add 10.1.0.1/24
+interface br-seg2 set state up
+interface br-seg2 add 10.2.0.1/24
+interface veth-seg1-up set state up
+interface veth-seg1-br set state up
+interface veth-seg2-up set state up
+interface veth-seg2-br set state up
+interface br-seg1.100 set state up
+interface vlan100br set state up
+interface vlan100br add 10.100.0.1/24
+
+# Default route
+route add default via 10.0.0.1

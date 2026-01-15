@@ -97,6 +97,7 @@ fn getCommandName(cmd: *const parser.Command) []const u8 {
         .bond => |b| return b.name orelse "",
         .bridge => |b| return b.name orelse "",
         .vlan => |v| return v.parent orelse "",
+        .veth => |v| return v.name orelse "",
         .interface => |i| return i.name orelse "",
         .route => return "route",
         .analyze => return "analyze",

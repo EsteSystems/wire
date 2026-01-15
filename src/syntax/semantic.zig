@@ -65,6 +65,7 @@ pub const Validator = struct {
             .bond => |bond| try self.validateBondCommand(bond, cmd.action, cmd.attributes),
             .bridge => |bridge| try self.validateBridgeCommand(bridge, cmd.action, cmd.attributes),
             .vlan => |vlan| try self.validateVlanCommand(vlan, cmd.action, cmd.attributes),
+            .veth => |veth| try self.validateVethCommand(veth, cmd.action),
             .analyze => {}, // Always valid
         }
     }
@@ -267,6 +268,34 @@ pub const Validator = struct {
                 try self.addError("VLAN ID must be between 1 and 4094", "id");
                 return SemanticError.InvalidVlanId;
             }
+        }
+    }
+
+    // Veth validation
+
+    fn validateVethCommand(
+        self: *Self,
+        veth: parser.VethSubject,
+        action: Action,
+    ) SemanticError!void {
+        switch (action) {
+            .create => {
+                if (veth.name == null) {
+                    try self.addError("Veth name is required", "name");
+                    return SemanticError.MissingInterfaceName;
+                }
+                if (veth.peer == null) {
+                    try self.addError("Veth peer name is required", "peer");
+                    return SemanticError.MissingInterfaceName;
+                }
+            },
+            .delete => {
+                if (veth.name == null) {
+                    try self.addError("Veth name is required", "name");
+                    return SemanticError.MissingInterfaceName;
+                }
+            },
+            else => {},
         }
     }
 

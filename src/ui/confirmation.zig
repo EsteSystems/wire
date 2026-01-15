@@ -158,6 +158,15 @@ pub const ConfirmationSystem = struct {
                     try self.stdout.print(" on {s}", .{parent});
                 }
             },
+            .veth => |veth| {
+                try self.stdout.print("veth", .{});
+                if (veth.name) |name| {
+                    try self.stdout.print(" {s}", .{name});
+                }
+                if (veth.peer) |peer| {
+                    try self.stdout.print(" peer {s}", .{peer});
+                }
+            },
             .analyze => {
                 try self.stdout.print("analyze", .{});
             },

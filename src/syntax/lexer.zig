@@ -8,6 +8,7 @@ pub const TokenType = enum {
     BOND,
     BRIDGE,
     VLAN,
+    VETH,
     NAMESPACE,
     NEIGHBOR,
 
@@ -59,6 +60,8 @@ pub const TokenType = enum {
     AFTER,
     CHECKPOINT,
     DEFAULT,
+    PEER,
+    ID,
 };
 
 /// A token from the lexer
@@ -89,6 +92,7 @@ pub const Lexer = struct {
         .{ "bond", .BOND },
         .{ "bridge", .BRIDGE },
         .{ "vlan", .VLAN },
+        .{ "veth", .VETH },
         .{ "namespace", .NAMESPACE },
         .{ "neighbor", .NEIGHBOR },
 
@@ -127,6 +131,8 @@ pub const Lexer = struct {
         .{ "after", .AFTER },
         .{ "checkpoint", .CHECKPOINT },
         .{ "default", .DEFAULT },
+        .{ "peer", .PEER },
+        .{ "id", .ID },
     });
 
     pub fn init(source: []const u8) Self {

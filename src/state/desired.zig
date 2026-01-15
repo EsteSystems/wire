@@ -22,6 +22,7 @@ fn processCommand(state: *types.NetworkState, cmd: *const parser.Command) !void 
         .bond => |bond| try processBondCommand(state, bond, cmd.action, cmd.attributes),
         .bridge => |bridge| try processBridgeCommand(state, bridge, cmd.action, cmd.attributes),
         .vlan => |vlan| try processVlanCommand(state, vlan, cmd.action, cmd.attributes),
+        .veth => |veth| try processVethCommand(state, veth, cmd.action),
         .route => |route| try processRouteCommand(state, route, cmd.action, cmd.attributes),
         .analyze => {}, // Not a state-modifying command
     }
@@ -242,6 +243,53 @@ fn processVlanCommand(
             for (state.vlans.items, 0..) |v, i| {
                 if (std.mem.eql(u8, v.getName(), vlan_name)) {
                     _ = state.vlans.orderedRemove(i);
+                    break;
+                }
+            }
+        },
+        else => {},
+    }
+}
+
+fn processVethCommand(
+    state: *types.NetworkState,
+    veth: parser.VethSubject,
+    action: parser.Action,
+) !void {
+    switch (action) {
+        .create, .none => {
+            const name = veth.name orelse return;
+            const peer = veth.peer orelse return;
+
+            // Create veth interface
+            const veth_iface = findOrCreateInterface(state, name);
+            veth_iface.link_type = .veth;
+
+            // Create peer interface
+            const peer_iface = findOrCreateInterface(state, peer);
+            peer_iface.link_type = .veth;
+
+            // Create veth state to track the pair relationship
+            var veth_state = types.VethState{
+                .name = undefined,
+                .name_len = 0,
+                .index = veth_iface.index,
+                .peer_index = peer_iface.index,
+                .peer_netns_id = null,
+            };
+
+            @memcpy(veth_state.name[0..name.len], name);
+            veth_state.name_len = name.len;
+
+            try state.veths.append(veth_state);
+        },
+        .delete => {
+            const name = veth.name orelse return;
+
+            // Remove veth from state
+            for (state.veths.items, 0..) |v, i| {
+                if (std.mem.eql(u8, v.getName(), name)) {
+                    _ = state.veths.orderedRemove(i);
                     break;
                 }
             }

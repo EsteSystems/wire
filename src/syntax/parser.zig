@@ -48,6 +48,20 @@ pub const Command = struct {
     attributes: []Attribute,
 
     pub fn deinit(self: *Command, allocator: std.mem.Allocator) void {
+        // Free subject-specific allocations
+        switch (self.subject) {
+            .bond => |bond| {
+                if (bond.members) |members| {
+                    allocator.free(members);
+                }
+            },
+            .bridge => |bridge| {
+                if (bridge.ports) |ports| {
+                    allocator.free(ports);
+                }
+            },
+            else => {},
+        }
         allocator.free(self.attributes);
     }
 };
@@ -59,6 +73,7 @@ pub const Subject = union(enum) {
     bond: BondSubject,
     bridge: BridgeSubject,
     vlan: VlanSubject,
+    veth: VethSubject,
     analyze: void,
 };
 
@@ -72,15 +87,24 @@ pub const RouteSubject = struct {
 
 pub const BondSubject = struct {
     name: ?[]const u8,
+    mode: ?[]const u8, // For create: active-backup, 802.3ad, etc.
+    members: ?[]const u8, // Space-separated member names for add
 };
 
 pub const BridgeSubject = struct {
     name: ?[]const u8,
+    ports: ?[]const u8, // Space-separated port names for add
 };
 
 pub const VlanSubject = struct {
     id: ?u16,
     parent: ?[]const u8,
+    name: ?[]const u8, // Custom VLAN interface name
+};
+
+pub const VethSubject = struct {
+    name: ?[]const u8,
+    peer: ?[]const u8,
 };
 
 /// The action to perform
@@ -244,6 +268,164 @@ pub const Parser = struct {
                     .action = action,
                     .attributes = try attrs.toOwnedSlice(),
                 });
+            } else if (self.check(.BOND)) {
+                // Parse bond command: bond <name> create mode <mode>
+                //                  or: bond <name> add <member> [member...]
+                _ = self.advance();
+                const name = if (!self.isAtEnd() and self.check(.IDENTIFIER))
+                    self.advance().lexeme
+                else
+                    null;
+
+                var action = Action{ .none = {} };
+                var mode: ?[]const u8 = null;
+                var members: ?[]const u8 = null;
+
+                if (!self.isAtEnd()) {
+                    if (self.check(.CREATE)) {
+                        _ = self.advance();
+                        action = Action{ .create = {} };
+                        // Check for mode
+                        if (!self.isAtEnd() and self.check(.MODE)) {
+                            _ = self.advance();
+                            if (!self.isAtEnd()) {
+                                mode = self.advance().lexeme;
+                            }
+                        }
+                    } else if (self.check(.ADD)) {
+                        _ = self.advance();
+                        action = Action{ .add = .{ .value = null } };
+                        // Collect member names
+                        var member_list = std.ArrayList(u8).init(self.allocator);
+                        defer member_list.deinit();
+                        while (!self.isAtEnd() and self.check(.IDENTIFIER)) {
+                            if (member_list.items.len > 0) {
+                                try member_list.append(' ');
+                            }
+                            try member_list.appendSlice(self.advance().lexeme);
+                        }
+                        if (member_list.items.len > 0) {
+                            members = try self.allocator.dupe(u8, member_list.items);
+                        }
+                    }
+                }
+
+                try commands.append(Command{
+                    .subject = Subject{ .bond = .{ .name = name, .mode = mode, .members = members } },
+                    .action = action,
+                    .attributes = &[_]Attribute{},
+                });
+            } else if (self.check(.BRIDGE)) {
+                // Parse bridge command: bridge <name> create
+                //                    or: bridge <name> add <port> [port...]
+                _ = self.advance();
+                const name = if (!self.isAtEnd() and self.check(.IDENTIFIER))
+                    self.advance().lexeme
+                else
+                    null;
+
+                var action = Action{ .none = {} };
+                var ports: ?[]const u8 = null;
+
+                if (!self.isAtEnd()) {
+                    if (self.check(.CREATE)) {
+                        _ = self.advance();
+                        action = Action{ .create = {} };
+                    } else if (self.check(.ADD)) {
+                        _ = self.advance();
+                        action = Action{ .add = .{ .value = null } };
+                        // Collect port names
+                        var port_list = std.ArrayList(u8).init(self.allocator);
+                        defer port_list.deinit();
+                        while (!self.isAtEnd() and self.check(.IDENTIFIER)) {
+                            if (port_list.items.len > 0) {
+                                try port_list.append(' ');
+                            }
+                            try port_list.appendSlice(self.advance().lexeme);
+                        }
+                        if (port_list.items.len > 0) {
+                            ports = try self.allocator.dupe(u8, port_list.items);
+                        }
+                    }
+                }
+
+                try commands.append(Command{
+                    .subject = Subject{ .bridge = .{ .name = name, .ports = ports } },
+                    .action = action,
+                    .attributes = &[_]Attribute{},
+                });
+            } else if (self.check(.VETH)) {
+                // Parse veth command: veth <name> peer <peer>
+                _ = self.advance();
+                const name = if (!self.isAtEnd() and self.check(.IDENTIFIER))
+                    self.advance().lexeme
+                else
+                    null;
+
+                var peer: ?[]const u8 = null;
+                var action = Action{ .none = {} };
+
+                if (!self.isAtEnd() and self.check(.PEER)) {
+                    _ = self.advance();
+                    action = Action{ .create = {} };
+                    if (!self.isAtEnd() and self.check(.IDENTIFIER)) {
+                        peer = self.advance().lexeme;
+                    }
+                }
+
+                try commands.append(Command{
+                    .subject = Subject{ .veth = .{ .name = name, .peer = peer } },
+                    .action = action,
+                    .attributes = &[_]Attribute{},
+                });
+            } else if (self.check(.VLAN)) {
+                // Parse vlan command: vlan <id> on <parent> [name <name>]
+                //                  or: vlan <name> delete
+                _ = self.advance();
+
+                var id: ?u16 = null;
+                var parent: ?[]const u8 = null;
+                var vlan_name: ?[]const u8 = null;
+                var action = Action{ .create = {} };
+
+                // First token could be ID (number) or name (identifier)
+                if (!self.isAtEnd()) {
+                    if (self.check(.NUMBER)) {
+                        const num_str = self.advance().lexeme;
+                        id = std.fmt.parseInt(u16, num_str, 10) catch null;
+                    } else if (self.check(.IDENTIFIER)) {
+                        vlan_name = self.advance().lexeme;
+                    }
+                }
+
+                // Check for "on <parent>"
+                if (!self.isAtEnd() and self.check(.ON)) {
+                    _ = self.advance();
+                    if (!self.isAtEnd() and self.check(.IDENTIFIER)) {
+                        parent = self.advance().lexeme;
+                    }
+                }
+
+                // Check for "id <id>" (alternative syntax)
+                if (!self.isAtEnd() and self.check(.ID)) {
+                    _ = self.advance();
+                    if (!self.isAtEnd() and self.check(.NUMBER)) {
+                        const num_str = self.advance().lexeme;
+                        id = std.fmt.parseInt(u16, num_str, 10) catch null;
+                    }
+                }
+
+                // Check for "delete"
+                if (!self.isAtEnd() and self.check(.DELETE)) {
+                    _ = self.advance();
+                    action = Action{ .delete = {} };
+                }
+
+                try commands.append(Command{
+                    .subject = Subject{ .vlan = .{ .id = id, .parent = parent, .name = vlan_name } },
+                    .action = action,
+                    .attributes = &[_]Attribute{},
+                });
             } else {
                 // Parse other command types normally
                 const cmd = try self.parseCommand();
@@ -397,7 +579,7 @@ pub const Parser = struct {
                     self.advance().lexeme
                 else
                     null;
-                return Subject{ .bond = .{ .name = name } };
+                return Subject{ .bond = .{ .name = name, .mode = null, .members = null } };
             },
             .BRIDGE => {
                 _ = self.advance();
@@ -405,7 +587,7 @@ pub const Parser = struct {
                     self.advance().lexeme
                 else
                     null;
-                return Subject{ .bridge = .{ .name = name } };
+                return Subject{ .bridge = .{ .name = name, .ports = null } };
             },
             .VLAN => {
                 _ = self.advance();
@@ -426,7 +608,15 @@ pub const Parser = struct {
                     }
                 }
 
-                return Subject{ .vlan = .{ .id = id, .parent = parent } };
+                return Subject{ .vlan = .{ .id = id, .parent = parent, .name = null } };
+            },
+            .VETH => {
+                _ = self.advance();
+                const name = if (!self.isAtEnd() and self.check(.IDENTIFIER))
+                    self.advance().lexeme
+                else
+                    null;
+                return Subject{ .veth = .{ .name = name, .peer = null } };
             },
             .ANALYZE => {
                 _ = self.advance();
