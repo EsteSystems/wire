@@ -230,6 +230,84 @@ pub fn addRoute(family: u8, dst: ?[]const u8, dst_len: u8, gateway: ?[]const u8,
     allocator.free(response);
 }
 
+/// ECMP nexthop specification
+pub const Nexthop = struct {
+    gateway: []const u8, // Gateway IP bytes (4 for IPv4, 16 for IPv6)
+    oif: ?u32, // Output interface index (optional)
+    weight: u8, // Weight for load balancing (0 = equal)
+};
+
+/// rtnexthop structure (kernel: struct rtnexthop)
+const RtNexthop = extern struct {
+    len: u16,
+    flags: u8,
+    hops: u8, // Weight - 1 (0 means weight of 1)
+    ifindex: i32,
+};
+
+/// Add an ECMP (Equal-Cost Multi-Path) route with multiple nexthops
+pub fn addEcmpRoute(family: u8, dst: ?[]const u8, dst_len: u8, nexthops: []const Nexthop) !void {
+    if (nexthops.len == 0) return error.NoNexthops;
+
+    var nl = try socket.NetlinkSocket.open();
+    defer nl.close();
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var buf: [1024]u8 = undefined;
+    var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
+
+    const hdr = try builder.addHeader(socket.RTM.NEWROUTE, socket.NLM_F.REQUEST | socket.NLM_F.ACK | socket.NLM_F.CREATE | socket.NLM_F.EXCL);
+    try builder.addData(socket.RtMsg, socket.RtMsg{
+        .family = family,
+        .dst_len = dst_len,
+        .table = socket.RT_TABLE.MAIN,
+        .protocol = 4, // RTPROT_STATIC
+        .scope = socket.RT_SCOPE.UNIVERSE,
+        .type = socket.RTN.UNICAST,
+    });
+
+    if (dst) |d| {
+        try builder.addAttr(socket.RTA.DST, d);
+    }
+
+    // Build RTA_MULTIPATH attribute containing multiple rtnexthop structs
+    // Each rtnexthop is followed by its own RTA_GATEWAY attribute
+    const mp_start = try builder.startNestedAttr(socket.RTA.MULTIPATH);
+
+    for (nexthops) |nh| {
+        // Record where this nexthop starts
+        const nh_offset = builder.offset;
+
+        // Write rtnexthop header (will patch len later)
+        if (builder.offset + @sizeOf(RtNexthop) > builder.buffer.len) {
+            return error.BufferTooSmall;
+        }
+        const rtnh: *RtNexthop = @ptrCast(@alignCast(builder.buffer[builder.offset..].ptr));
+        rtnh.* = RtNexthop{
+            .len = @sizeOf(RtNexthop),
+            .flags = 0,
+            .hops = if (nh.weight > 0) nh.weight - 1 else 0,
+            .ifindex = if (nh.oif) |o| @intCast(o) else 0,
+        };
+        builder.offset += @sizeOf(RtNexthop);
+
+        // Add RTA_GATEWAY attribute after rtnexthop
+        try builder.addAttr(socket.RTA.GATEWAY, nh.gateway);
+
+        // Patch rtnexthop length to include gateway attr
+        rtnh.len = @intCast(builder.offset - nh_offset);
+    }
+
+    builder.endNestedAttr(mp_start);
+
+    const msg = builder.finalize(hdr);
+    const response = try nl.request(msg, allocator);
+    allocator.free(response);
+}
+
 /// Delete a route
 pub fn deleteRoute(family: u8, dst: ?[]const u8, dst_len: u8) !void {
     var nl = try socket.NetlinkSocket.open();

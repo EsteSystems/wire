@@ -129,8 +129,14 @@ pub const Bond = struct {
     miimon: u32,
     updelay: u32,
     downdelay: u32,
-    members: []i32,
+    members: [MAX_BOND_MEMBERS]i32,
+    member_count: usize,
     flags: u32,
+    xmit_hash_policy: ?XmitHashPolicy,
+    lacp_rate: ?LacpRate,
+    ad_select: ?AdSelect,
+
+    const MAX_BOND_MEMBERS = 16;
 
     pub fn getName(self: *const Bond) []const u8 {
         return self.name[0..self.name_len];
@@ -139,7 +145,101 @@ pub const Bond = struct {
     pub fn isUp(self: *const Bond) bool {
         return (self.flags & socket.IFF.UP) != 0;
     }
+
+    pub fn getMembers(self: *const Bond) []const i32 {
+        return self.members[0..self.member_count];
+    }
 };
+
+/// Build bond IFLA_LINKINFO/IFLA_INFO_DATA attributes into a message builder
+fn buildBondInfoData(builder: *socket.MessageBuilder, options: BondOptions) !void {
+    const linkinfo_start = try builder.startNestedAttr(socket.IFLA.LINKINFO);
+
+    try builder.addAttrString(socket.IFLA_INFO.KIND, "bond");
+
+    const data_start = try builder.startNestedAttr(socket.IFLA_INFO.DATA);
+
+    try builder.addAttrU8(socket.IFLA_BOND.MODE, @intFromEnum(options.mode));
+    try builder.addAttrU32(socket.IFLA_BOND.MIIMON, options.miimon);
+
+    if (options.updelay > 0) {
+        try builder.addAttrU32(socket.IFLA_BOND.UPDELAY, options.updelay);
+    }
+    if (options.downdelay > 0) {
+        try builder.addAttrU32(socket.IFLA_BOND.DOWNDELAY, options.downdelay);
+    }
+
+    if (options.lacp_rate) |rate| {
+        try builder.addAttrU8(socket.IFLA_BOND.AD_LACP_RATE, @intFromEnum(rate));
+    }
+
+    if (options.xmit_hash_policy) |policy| {
+        try builder.addAttrU8(socket.IFLA_BOND.XMIT_HASH_POLICY, @intFromEnum(policy));
+    }
+
+    if (options.ad_select) |sel| {
+        try builder.addAttrU8(socket.IFLA_BOND.AD_SELECT, @intFromEnum(sel));
+    }
+
+    builder.endNestedAttr(data_start);
+    builder.endNestedAttr(linkinfo_start);
+}
+
+/// Validate bond creation pre-checks
+pub fn validateBondCreation(allocator: std.mem.Allocator, member_names: []const []const u8) !void {
+    const interfaces = try interface.getInterfaces(allocator);
+    defer allocator.free(interfaces);
+
+    for (member_names) |member_name| {
+        var found = false;
+        for (interfaces) |iface| {
+            if (std.mem.eql(u8, iface.getName(), member_name)) {
+                found = true;
+                // Check if already enslaved to a master
+                if (iface.master_index != null) {
+                    return error.InterfaceAlreadyEnslaved;
+                }
+                break;
+            }
+        }
+        if (!found) {
+            return error.InterfaceNotFound;
+        }
+    }
+}
+
+/// Find the next available bond name (bond0..bond99)
+pub fn nextBondName(allocator: std.mem.Allocator) !struct { name: [16]u8, len: usize } {
+    const interfaces = try interface.getInterfaces(allocator);
+    defer allocator.free(interfaces);
+
+    var i: u8 = 0;
+    while (i < 100) : (i += 1) {
+        var name_buf: [16]u8 = undefined;
+        const name_slice = std.fmt.bufPrint(&name_buf, "bond{d}", .{i}) catch continue;
+        const name_len = name_slice.len;
+
+        var exists = false;
+        for (interfaces) |iface| {
+            if (std.mem.eql(u8, iface.getName(), name_buf[0..name_len])) {
+                exists = true;
+                break;
+            }
+        }
+
+        if (!exists) {
+            var result: struct { name: [16]u8, len: usize } = .{
+                .name = undefined,
+                .len = name_len,
+            };
+            @memset(&result.name, 0);
+            @memcpy(result.name[0..name_len], name_buf[0..name_len]);
+            return result;
+        }
+    }
+
+    return error.NoBondNameAvailable;
+}
 
 /// Create a bond interface with options
 pub fn createBondWithOptions(name: []const u8, options: BondOptions) !void {
@@ -153,53 +253,11 @@ pub fn createBondWithOptions(name: []const u8, options: BondOptions) !void {
     var buf: [512]u8 = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
-    // Build RTM_NEWLINK message
     const hdr = try builder.addHeader(socket.RTM.NEWLINK, socket.NLM_F.REQUEST | socket.NLM_F.ACK | socket.NLM_F.CREATE | socket.NLM_F.EXCL);
     try builder.addData(socket.IfInfoMsg, socket.IfInfoMsg{});
 
-    // Add interface name
     try builder.addAttrString(socket.IFLA.IFNAME, name);
-
-    // Add IFLA_LINKINFO nested attribute
-    const linkinfo_start = try builder.startNestedAttr(socket.IFLA.LINKINFO);
-
-    // IFLA_INFO_KIND = "bond"
-    try builder.addAttrString(socket.IFLA_INFO.KIND, "bond");
-
-    // IFLA_INFO_DATA (bond-specific attributes)
-    const data_start = try builder.startNestedAttr(socket.IFLA_INFO.DATA);
-
-    // Bond mode
-    try builder.addAttrU8(socket.IFLA_BOND.MODE, @intFromEnum(options.mode));
-
-    // MII monitoring interval
-    try builder.addAttrU32(socket.IFLA_BOND.MIIMON, options.miimon);
-
-    // Up/down delays
-    if (options.updelay > 0) {
-        try builder.addAttrU32(socket.IFLA_BOND.UPDELAY, options.updelay);
-    }
-    if (options.downdelay > 0) {
-        try builder.addAttrU32(socket.IFLA_BOND.DOWNDELAY, options.downdelay);
-    }
-
-    // LACP rate (only for 802.3ad mode)
-    if (options.lacp_rate) |rate| {
-        try builder.addAttrU8(socket.IFLA_BOND.AD_LACP_RATE, @intFromEnum(rate));
-    }
-
-    // Transmit hash policy (for load-balancing modes)
-    if (options.xmit_hash_policy) |policy| {
-        try builder.addAttrU8(socket.IFLA_BOND.XMIT_HASH_POLICY, @intFromEnum(policy));
-    }
-
-    // Aggregator selection (only for 802.3ad mode)
-    if (options.ad_select) |sel| {
-        try builder.addAttrU8(socket.IFLA_BOND.AD_SELECT, @intFromEnum(sel));
-    }
-
-    builder.endNestedAttr(data_start);
-    builder.endNestedAttr(linkinfo_start);
+    try buildBondInfoData(&builder, options);
 
     const msg = builder.finalize(hdr);
     const response = try nl.request(msg, allocator);
@@ -211,6 +269,43 @@ pub fn createBond(name: []const u8, mode: BondMode) !void {
     return createBondWithOptions(name, .{ .mode = mode });
 }
 
+/// Modify an existing bond interface's options
+pub fn modifyBond(name: []const u8, options: BondOptions) !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    const maybe_iface = try interface.getInterfaceByName(allocator, name);
+    const iface = maybe_iface orelse return error.InterfaceNotFound;
+
+    // Verify it's actually a bond
+    if (iface.getLinkKind()) |kind| {
+        if (!std.mem.eql(u8, kind, "bond")) {
+            return error.NotABond;
+        }
+    } else {
+        return error.NotABond;
+    }
+
+    var nl = try socket.NetlinkSocket.open();
+    defer nl.close();
+
+    // RTM_NEWLINK without CREATE/EXCL flags modifies existing interface
+    var buf: [512]u8 = undefined;
+    var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
+
+    const hdr = try builder.addHeader(socket.RTM.NEWLINK, socket.NLM_F.REQUEST | socket.NLM_F.ACK);
+    try builder.addData(socket.IfInfoMsg, socket.IfInfoMsg{
+        .index = iface.index,
+    });
+
+    try buildBondInfoData(&builder, options);
+
+    const msg = builder.finalize(hdr);
+    const response = try nl.request(msg, allocator);
+    allocator.free(response);
+}
+
 /// Delete a bond interface
 pub fn deleteBond(name: []const u8) !void {
     var nl = try socket.NetlinkSocket.open();
@@ -220,7 +315,6 @@ pub fn deleteBond(name: []const u8) !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    // First get the interface index
     const maybe_iface = try interface.getInterfaceByName(allocator, name);
     if (maybe_iface == null) {
         return error.InterfaceNotFound;
@@ -240,7 +334,7 @@ pub fn deleteBond(name: []const u8) !void {
     allocator.free(response);
 }
 
-/// Add a member interface to a bond
+/// Add a member interface to a bond with validation
 pub fn addBondMember(bond_name: []const u8, member_name: []const u8) !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -251,7 +345,16 @@ pub fn addBondMember(bond_name: []const u8, member_name: []const u8) !void {
     if (maybe_bond == null) {
         return error.InterfaceNotFound;
     }
-    const bond = maybe_bond.?;
+    const bond_iface = maybe_bond.?;
+
+    // Verify it's a bond
+    if (bond_iface.getLinkKind()) |kind| {
+        if (!std.mem.eql(u8, kind, "bond")) {
+            return error.NotABond;
+        }
+    } else {
+        return error.NotABond;
+    }
 
     // Get member interface
     const maybe_member = try interface.getInterfaceByName(allocator, member_name);
@@ -260,7 +363,12 @@ pub fn addBondMember(bond_name: []const u8, member_name: []const u8) !void {
     }
     const member = maybe_member.?;
 
-    // First bring the member interface down
+    // Check member is not already enslaved
+    if (member.master_index != null) {
+        return error.InterfaceAlreadyEnslaved;
+    }
+
+    // Bring the member interface down first
     try interface.setInterfaceState(member_name, false);
 
     // Set IFLA_MASTER to add to bond
@@ -275,8 +383,7 @@ pub fn addBondMember(bond_name: []const u8, member_name: []const u8) !void {
         .index = member.index,
     });
 
-    // Set master to bond index
-    try builder.addAttrU32(socket.IFLA.MASTER, @intCast(bond.index));
+    try builder.addAttrU32(socket.IFLA.MASTER, @intCast(bond_iface.index));
 
     const msg = builder.finalize(hdr);
     const response = try nl.request(msg, allocator);
@@ -292,7 +399,6 @@ pub fn removeBondMember(member_name: []const u8) !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    // Get member interface
     const maybe_member = try interface.getInterfaceByName(allocator, member_name);
     if (maybe_member == null) {
         return error.InterfaceNotFound;
@@ -314,7 +420,6 @@ pub fn removeBondMember(member_name: []const u8) !void {
         .index = member.index,
     });
 
-    // Set master to 0 to detach
     try builder.addAttrU32(socket.IFLA.MASTER, 0);
 
     const msg = builder.finalize(hdr);
@@ -322,18 +427,104 @@ pub fn removeBondMember(member_name: []const u8) !void {
     allocator.free(response);
 }
 
-/// Get list of bond interfaces
+/// Get list of bond interfaces by filtering on link_kind == "bond"
+/// and collecting bond-specific attributes from IFLA_INFO_DATA
 pub fn getBonds(allocator: std.mem.Allocator) ![]Bond {
-    // Get all interfaces and filter for bonds
     const interfaces = try interface.getInterfaces(allocator);
     defer allocator.free(interfaces);
 
     var bonds = std.ArrayList(Bond).init(allocator);
     errdefer bonds.deinit();
 
-    // For now, we identify bonds by checking if the interface type is bond
-    // This requires parsing IFLA_LINKINFO which we'll need to add to getInterfaces
-    // For simplicity, return empty list - we'll need to enhance interface parsing
+    for (interfaces) |iface| {
+        const kind = iface.getLinkKind() orelse continue;
+        if (!std.mem.eql(u8, kind, "bond")) continue;
+
+        // Collect members: interfaces whose master_index matches this bond
+        var members: [Bond.MAX_BOND_MEMBERS]i32 = undefined;
+        var member_count: usize = 0;
+        for (interfaces) |other| {
+            if (other.master_index) |master_idx| {
+                if (master_idx == iface.index and member_count < Bond.MAX_BOND_MEMBERS) {
+                    members[member_count] = other.index;
+                    member_count += 1;
+                }
+            }
+        }
+
+        // Parse bond-specific attrs from info_data if available
+        var mode: BondMode = .balance_rr;
+        var miimon: u32 = 0;
+        var updelay: u32 = 0;
+        var downdelay: u32 = 0;
+        var xmit_hash_policy: ?XmitHashPolicy = null;
+        var lacp_rate: ?LacpRate = null;
+        var ad_select: ?AdSelect = null;
+
+        if (iface.info_data_len > 0) {
+            var parser = socket.AttrParser.init(iface.info_data[0..iface.info_data_len]);
+            while (parser.next()) |attr| {
+                switch (attr.attr_type) {
+                    socket.IFLA_BOND.MODE => {
+                        if (attr.value.len >= 1) {
+                            mode = @enumFromInt(attr.value[0]);
+                        }
+                    },
+                    socket.IFLA_BOND.MIIMON => {
+                        if (attr.value.len >= 4) {
+                            miimon = std.mem.readInt(u32, attr.value[0..4], .little);
+                        }
+                    },
+                    socket.IFLA_BOND.UPDELAY => {
+                        if (attr.value.len >= 4) {
+                            updelay = std.mem.readInt(u32, attr.value[0..4], .little);
+                        }
+                    },
+                    socket.IFLA_BOND.DOWNDELAY => {
+                        if (attr.value.len >= 4) {
+                            downdelay = std.mem.readInt(u32, attr.value[0..4], .little);
+                        }
+                    },
+                    socket.IFLA_BOND.XMIT_HASH_POLICY => {
+                        if (attr.value.len >= 1) {
+                            xmit_hash_policy = @enumFromInt(attr.value[0]);
+                        }
+                    },
+                    socket.IFLA_BOND.AD_LACP_RATE => {
+                        if (attr.value.len >= 1) {
+                            lacp_rate = @enumFromInt(attr.value[0]);
+                        }
+                    },
+                    socket.IFLA_BOND.AD_SELECT => {
+                        if (attr.value.len >= 1) {
+                            ad_select = @enumFromInt(attr.value[0]);
+                        }
+                    },
+                    else => {},
+                }
+            }
+        }
+
+        var bond = Bond{
+            .name = undefined,
+            .name_len = iface.name_len,
+            .index = iface.index,
+            .mode = mode,
+            .miimon = miimon,
+            .updelay = updelay,
+            .downdelay = downdelay,
+            .members = members,
+            .member_count = member_count,
+            .flags = iface.flags,
+            .xmit_hash_policy = xmit_hash_policy,
+            .lacp_rate = lacp_rate,
+            .ad_select = ad_select,
+        };
+        @memset(&bond.name, 0);
+        @memcpy(bond.name[0..iface.name_len], iface.name[0..iface.name_len]);
+
+        try bonds.append(bond);
+    }
 
     return bonds.toOwnedSlice();
 }
@@ -365,4 +556,95 @@ test "bond mode from string" {
 test "bond mode to string" {
     try std.testing.expectEqualStrings("balance-rr", BondMode.balance_rr.toString());
     try std.testing.expectEqualStrings("802.3ad", BondMode.@"802.3ad".toString());
+}
+
+test "lacp rate from string" {
+    try std.testing.expectEqual(LacpRate.slow, LacpRate.fromString("slow").?);
+    try std.testing.expectEqual(LacpRate.fast, LacpRate.fromString("fast").?);
+    try std.testing.expectEqual(LacpRate.slow, LacpRate.fromString("0").?);
+    try std.testing.expectEqual(LacpRate.fast, LacpRate.fromString("1").?);
+    try std.testing.expect(LacpRate.fromString("invalid") == null);
+}
+
+test "xmit hash policy from string" {
+    try std.testing.expectEqual(XmitHashPolicy.layer2, XmitHashPolicy.fromString("layer2").?);
+    try std.testing.expectEqual(XmitHashPolicy.layer3_4, XmitHashPolicy.fromString("layer3+4").?);
+    try std.testing.expectEqual(XmitHashPolicy.vlan_srcmac, XmitHashPolicy.fromString("vlan+srcmac").?);
+    try std.testing.expect(XmitHashPolicy.fromString("invalid") == null);
+}
+
+test "ad select from string" {
+    try std.testing.expectEqual(AdSelect.stable, AdSelect.fromString("stable").?);
+    try std.testing.expectEqual(AdSelect.bandwidth, AdSelect.fromString("bandwidth").?);
+    try std.testing.expectEqual(AdSelect.count, AdSelect.fromString("count").?);
+    try std.testing.expect(AdSelect.fromString("invalid") == null);
+}
+
+test "bond options default values" {
+    const opts = BondOptions{};
+    try std.testing.expectEqual(BondMode.balance_rr, opts.mode);
+    try std.testing.expectEqual(@as(u32, 100), opts.miimon);
+    try std.testing.expectEqual(@as(u32, 0), opts.updelay);
+    try std.testing.expectEqual(@as(u32, 0), opts.downdelay);
+    try std.testing.expect(opts.lacp_rate == null);
+    try std.testing.expect(opts.xmit_hash_policy == null);
+    try std.testing.expect(opts.ad_select == null);
+}
+
+test "bond struct getName" {
+    var bond = Bond{
+        .name = undefined,
+        .name_len = 5,
+        .index = 1,
+        .mode = .active_backup,
+        .miimon = 100,
+        .updelay = 0,
+        .downdelay = 0,
+        .members = undefined,
+        .member_count = 0,
+        .flags = 0,
+        .xmit_hash_policy = null,
+        .lacp_rate = null,
+        .ad_select = null,
+    };
+    @memset(&bond.name, 0);
+    @memcpy(bond.name[0..5], "bond0");
+    try std.testing.expectEqualStrings("bond0", bond.getName());
+}
+
+test "bond struct isUp" {
+    var bond = Bond{
+        .name = undefined,
+        .name_len = 5,
+        .index = 1,
+        .mode = .balance_rr,
+        .miimon = 100,
+        .updelay = 0,
+        .downdelay = 0,
+        .members = undefined,
+        .member_count = 0,
+        .flags = socket.IFF.UP | socket.IFF.RUNNING,
+        .xmit_hash_policy = null,
+        .lacp_rate = null,
+        .ad_select = null,
+    };
+    @memset(&bond.name, 0);
+    try std.testing.expect(bond.isUp());
+
+    bond.flags = 0;
+    try std.testing.expect(!bond.isUp());
+}
+
+test "bond mode roundtrip" {
+    // Every mode should survive toString -> fromString roundtrip
+    const modes = [_]BondMode{
+        .balance_rr, .active_backup, .balance_xor,
+        .broadcast,  .@"802.3ad",    .balance_tlb,
+        .balance_alb,
+    };
+    for (modes) |mode| {
+        const str = mode.toString();
+        const recovered = BondMode.fromString(str).?;
+        try std.testing.expectEqual(mode, recovered);
+    }
 }

@@ -493,12 +493,224 @@ pub fn displayFdb(entries: []const FdbEntry, writer: anytype, iface_resolver: an
     }
 }
 
-// Tests
+/// AF_BRIDGE family constant
+const AF_BRIDGE: u8 = 7;
 
-test "bridge create and delete" {
-    // This test would require root privileges
-    // Just verify the module compiles
+/// IFLA_AF_SPEC nested attribute type
+const IFLA_AF_SPEC: u16 = 26;
+
+/// Bridge VLAN info structure (used inside IFLA_BRIDGE_VLAN_INFO)
+const BRIDGE_VLAN_INFO: u16 = 2;
+
+/// Bridge VLAN flags
+pub const BRIDGE_VLAN_INFO_FLAGS = struct {
+    pub const MASTER: u16 = 0x01; // Operate on bridge device
+    pub const PVID: u16 = 0x02; // PVID entry
+    pub const UNTAGGED: u16 = 0x04; // Untagged entry
+    pub const RANGE_BEGIN: u16 = 0x08; // Begin of VLAN range
+    pub const RANGE_END: u16 = 0x10; // End of VLAN range
+};
+
+/// Enable or disable VLAN filtering on a bridge
+pub fn setBridgeVlanFiltering(name: []const u8, enabled: bool) !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    const maybe_bridge = try interface.getInterfaceByName(allocator, name);
+    if (maybe_bridge == null) {
+        return error.InterfaceNotFound;
+    }
+    const bridge = maybe_bridge.?;
+
+    // Verify it's a bridge
+    if (bridge.getLinkKind()) |kind| {
+        if (!std.mem.eql(u8, kind, "bridge")) {
+            return error.NotABridge;
+        }
+    } else {
+        return error.NotABridge;
+    }
+
+    var nl = try socket.NetlinkSocket.open();
+    defer nl.close();
+
+    var buf: [512]u8 = undefined;
+    var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
+
+    const hdr = try builder.addHeader(socket.RTM.NEWLINK, socket.NLM_F.REQUEST | socket.NLM_F.ACK);
+    try builder.addData(socket.IfInfoMsg, socket.IfInfoMsg{
+        .index = bridge.index,
+    });
+
+    const linkinfo_start = try builder.startNestedAttr(socket.IFLA.LINKINFO);
+    try builder.addAttrString(socket.IFLA_INFO.KIND, "bridge");
+    const data_start = try builder.startNestedAttr(socket.IFLA_INFO.DATA);
+    try builder.addAttrU8(socket.IFLA_BR.VLAN_FILTERING, if (enabled) 1 else 0);
+    builder.endNestedAttr(data_start);
+    builder.endNestedAttr(linkinfo_start);
+
+    const msg = builder.finalize(hdr);
+    const response = try nl.request(msg, allocator);
+    allocator.free(response);
 }
+
+/// Add a VLAN entry to a bridge port
+/// flags: combination of BRIDGE_VLAN_INFO_FLAGS (PVID, UNTAGGED, MASTER)
+pub fn addBridgeVlanEntry(port_name: []const u8, vid: u16, flags: u16) !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    const maybe_port = try interface.getInterfaceByName(allocator, port_name);
+    if (maybe_port == null) {
+        return error.InterfaceNotFound;
+    }
+    const port = maybe_port.?;
+
+    var nl = try socket.NetlinkSocket.open();
+    defer nl.close();
+
+    // RTM_SETLINK with AF_BRIDGE family and IFLA_AF_SPEC containing VLAN info
+    var buf: [512]u8 = undefined;
+    var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
+
+    const hdr = try builder.addHeader(socket.RTM.SETLINK, socket.NLM_F.REQUEST | socket.NLM_F.ACK);
+    try builder.addData(socket.IfInfoMsg, socket.IfInfoMsg{
+        .family = AF_BRIDGE,
+        .index = port.index,
+    });
+
+    // IFLA_AF_SPEC nested attr with bridge VLAN info
+    const af_spec_start = try builder.startNestedAttr(IFLA_AF_SPEC);
+
+    // BRIDGE_VLAN_INFO is a struct { u16 flags, u16 vid }
+    var vlan_info: [4]u8 = undefined;
+    std.mem.writeInt(u16, vlan_info[0..2], flags, .little);
+    std.mem.writeInt(u16, vlan_info[2..4], vid, .little);
+    try builder.addAttr(BRIDGE_VLAN_INFO, &vlan_info);
+
+    builder.endNestedAttr(af_spec_start);
+
+    const msg = builder.finalize(hdr);
+    const response = try nl.request(msg, allocator);
+    allocator.free(response);
+}
+
+/// Add a static FDB entry to a bridge
+pub fn addFdbEntry(port_name: []const u8, mac: [6]u8, vlan_id: ?u16) !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    const maybe_port = try interface.getInterfaceByName(allocator, port_name);
+    if (maybe_port == null) {
+        return error.InterfaceNotFound;
+    }
+    const port = maybe_port.?;
+
+    var nl = try socket.NetlinkSocket.open();
+    defer nl.close();
+
+    var buf: [256]u8 = undefined;
+    var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
+
+    const hdr = try builder.addHeader(socket.RTM.NEWNEIGH, socket.NLM_F.REQUEST | socket.NLM_F.ACK | socket.NLM_F.CREATE | socket.NLM_F.REPLACE);
+    try builder.addData(BridgeFdbMsg, BridgeFdbMsg{
+        .family = AF_BRIDGE,
+        .ifindex = port.index,
+        .state = NUD.PERMANENT,
+        .flags = NTF.SELF,
+    });
+
+    // Add MAC address
+    try builder.addAttr(NDA.LLADDR, &mac);
+
+    // Add VLAN ID if specified
+    if (vlan_id) |vid| {
+        try builder.addAttrU16(NDA.VLAN, vid);
+    }
+
+    const msg = builder.finalize(hdr);
+    const response = try nl.request(msg, allocator);
+    allocator.free(response);
+}
+
+/// Remove an FDB entry from a bridge
+pub fn removeFdbEntry(port_name: []const u8, mac: [6]u8, vlan_id: ?u16) !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    const maybe_port = try interface.getInterfaceByName(allocator, port_name);
+    if (maybe_port == null) {
+        return error.InterfaceNotFound;
+    }
+    const port = maybe_port.?;
+
+    var nl = try socket.NetlinkSocket.open();
+    defer nl.close();
+
+    var buf: [256]u8 = undefined;
+    var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
+
+    const hdr = try builder.addHeader(socket.RTM.DELNEIGH, socket.NLM_F.REQUEST | socket.NLM_F.ACK);
+    try builder.addData(BridgeFdbMsg, BridgeFdbMsg{
+        .family = AF_BRIDGE,
+        .ifindex = port.index,
+        .flags = NTF.SELF,
+    });
+
+    // Add MAC address
+    try builder.addAttr(NDA.LLADDR, &mac);
+
+    // Add VLAN ID if specified
+    if (vlan_id) |vid| {
+        try builder.addAttrU16(NDA.VLAN, vid);
+    }
+
+    const msg = builder.finalize(hdr);
+    const response = try nl.request(msg, allocator);
+    allocator.free(response);
+}
+
+/// Verify bridge STP state matches expected value (post-operation verification)
+pub fn verifyBridgeStp(allocator: std.mem.Allocator, name: []const u8, expected_stp: bool) !void {
+    const maybe_iface = try interface.getInterfaceByName(allocator, name);
+    if (maybe_iface == null) {
+        return error.VerificationFailed;
+    }
+    const iface = maybe_iface.?;
+
+    // Verify it's a bridge
+    if (iface.getLinkKind()) |kind| {
+        if (!std.mem.eql(u8, kind, "bridge")) {
+            return error.VerificationFailed;
+        }
+    } else {
+        return error.VerificationFailed;
+    }
+
+    // Parse bridge info_data for STP state
+    if (iface.info_data_len > 0) {
+        var parser = socket.AttrParser.init(iface.info_data[0..iface.info_data_len]);
+        while (parser.next()) |attr| {
+            if (attr.attr_type == socket.IFLA_BR.STP_STATE) {
+                if (attr.value.len >= 4) {
+                    const stp_val = std.mem.readInt(u32, attr.value[0..4], .little);
+                    const actual_stp = stp_val != 0;
+                    if (actual_stp != expected_stp) {
+                        return error.VerificationFailed;
+                    }
+                    return; // Verification passed
+                }
+            }
+        }
+    }
+    // If we couldn't find STP state in info_data, we can't verify
+}
+
+// Tests
 
 test "BridgeFdbMsg size" {
     try std.testing.expectEqual(@as(usize, 12), @sizeOf(BridgeFdbMsg));

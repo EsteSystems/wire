@@ -362,6 +362,7 @@ pub const RTA = struct {
     pub const PRIORITY: u16 = 6;
     pub const PREFSRC: u16 = 7;
     pub const METRICS: u16 = 8;
+    pub const MULTIPATH: u16 = 9;
     pub const TABLE: u16 = 15;
 };
 
@@ -473,7 +474,19 @@ pub const NetlinkSocket = struct {
                 if (hdr.type == NLMSG.ERROR) {
                     const err: *const NlMsgErr = @ptrCast(@alignCast(buf[offset + @sizeOf(NlMsgHdr) ..].ptr));
                     if (err.@"error" != 0) {
-                        return error.NetlinkError;
+                        // Map specific errno values to meaningful errors
+                        const errno = -err.@"error";
+                        return switch (errno) {
+                            17 => error.InterfaceAlreadyExists, // EEXIST
+                            19 => error.DeviceNotFound, // ENODEV
+                            16 => error.DeviceBusy, // EBUSY
+                            1 => error.PermissionDenied, // EPERM
+                            22 => error.InvalidArgument, // EINVAL
+                            2 => error.NoSuchEntry, // ENOENT
+                            28 => error.NoSpaceLeft, // ENOSPC
+                            95 => error.OperationNotSupported, // EOPNOTSUPP
+                            else => error.NetlinkError,
+                        };
                     }
                     // Error code 0 means ACK
                     done = true;

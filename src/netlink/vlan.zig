@@ -154,8 +154,77 @@ pub fn deleteVlan(name: []const u8) !void {
     allocator.free(response);
 }
 
+/// Get all VLAN interfaces by filtering on link_kind == "vlan"
+pub fn getVlans(allocator: std.mem.Allocator) ![]Vlan {
+    const interfaces = try interface.getInterfaces(allocator);
+    defer allocator.free(interfaces);
+
+    var vlans = std.ArrayList(Vlan).init(allocator);
+    errdefer vlans.deinit();
+
+    for (interfaces) |iface| {
+        const kind = iface.getLinkKind() orelse continue;
+        if (!std.mem.eql(u8, kind, "vlan")) continue;
+
+        var vlan = Vlan{
+            .name = undefined,
+            .name_len = iface.name_len,
+            .index = iface.index,
+            .parent_index = iface.link_index orelse 0,
+            .vlan_id = iface.vlan_id orelse 0,
+            .flags = iface.flags,
+        };
+        @memset(&vlan.name, 0);
+        @memcpy(vlan.name[0..iface.name_len], iface.name[0..iface.name_len]);
+
+        try vlans.append(vlan);
+    }
+
+    return vlans.toOwnedSlice();
+}
+
+/// Get VLAN by name
+pub fn getVlanByName(allocator: std.mem.Allocator, name: []const u8) !?Vlan {
+    const vlans = try getVlans(allocator);
+    defer allocator.free(vlans);
+
+    for (vlans) |vlan| {
+        if (std.mem.eql(u8, vlan.getName(), name)) {
+            return vlan;
+        }
+    }
+
+    return null;
+}
+
 // Tests
 
-test "vlan name format" {
-    // Just verify the module compiles
+test "vlan struct getName" {
+    var vlan = Vlan{
+        .name = undefined,
+        .name_len = 8,
+        .index = 5,
+        .parent_index = 2,
+        .vlan_id = 100,
+        .flags = 0,
+    };
+    @memset(&vlan.name, 0);
+    @memcpy(vlan.name[0..8], "eth0.100");
+    try std.testing.expectEqualStrings("eth0.100", vlan.getName());
+}
+
+test "vlan struct isUp" {
+    var vlan = Vlan{
+        .name = undefined,
+        .name_len = 0,
+        .index = 1,
+        .parent_index = 2,
+        .vlan_id = 100,
+        .flags = socket.IFF.UP,
+    };
+    @memset(&vlan.name, 0);
+    try std.testing.expect(vlan.isUp());
+
+    vlan.flags = 0;
+    try std.testing.expect(!vlan.isUp());
 }

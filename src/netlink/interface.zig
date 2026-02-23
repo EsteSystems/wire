@@ -19,6 +19,8 @@ pub const Interface = struct {
     link_kind: [16]u8, // IFLA_INFO_KIND - "veth", "bridge", "bond", etc.
     link_kind_len: usize,
     vlan_id: ?u16, // VLAN ID (from IFLA_VLAN_ID in INFO_DATA)
+    info_data: [256]u8, // Raw IFLA_INFO_DATA bytes for type-specific parsing
+    info_data_len: usize,
 
     pub fn getName(self: *const Interface) []const u8 {
         return self.name[0..self.name_len];
@@ -126,10 +128,13 @@ pub fn getInterfaces(allocator: std.mem.Allocator) ![]Interface {
                     .link_kind = undefined,
                     .link_kind_len = 0,
                     .vlan_id = null,
+                    .info_data = undefined,
+                    .info_data_len = 0,
                 };
                 @memset(&iface.name, 0);
                 @memset(&iface.mac, 0);
                 @memset(&iface.link_kind, 0);
+                @memset(&iface.info_data, 0);
 
                 // Parse attributes
                 const attrs_offset = ifinfo_offset + @sizeOf(socket.IfInfoMsg);
@@ -201,6 +206,12 @@ pub fn getInterfaces(allocator: std.mem.Allocator) ![]Interface {
                                     } else if (nested_attr.attr_type == socket.IFLA_INFO.DATA) {
                                         info_data = nested_attr.value;
                                     }
+                                }
+                                // Store raw info_data for type-specific parsing by bond/bridge/etc modules
+                                if (info_data) |data| {
+                                    const copy_len = @min(data.len, iface.info_data.len);
+                                    @memcpy(iface.info_data[0..copy_len], data[0..copy_len]);
+                                    iface.info_data_len = copy_len;
                                 }
                                 // If this is a VLAN, parse INFO_DATA for VLAN ID
                                 if (iface.link_kind_len >= 4 and std.mem.eql(u8, iface.link_kind[0..4], "vlan")) {
@@ -304,4 +315,130 @@ pub fn setInterfaceMtu(name: []const u8, mtu: u32) !void {
 
     const response = try nl.request(msg, allocator);
     allocator.free(response);
+}
+
+/// Physical NIC information
+pub const PhysicalNic = struct {
+    name: [16]u8,
+    name_len: usize,
+    index: i32,
+    mac: [6]u8,
+    flags: u32,
+    mtu: u32,
+    speed: ?u32, // Mbps, from /sys/class/net/<name>/speed
+    duplex: [16]u8, // From /sys/class/net/<name>/duplex
+    duplex_len: usize,
+
+    pub fn getName(self: *const PhysicalNic) []const u8 {
+        return self.name[0..self.name_len];
+    }
+
+    pub fn getDuplex(self: *const PhysicalNic) []const u8 {
+        if (self.duplex_len == 0) return "unknown";
+        return self.duplex[0..self.duplex_len];
+    }
+
+    pub fn isUp(self: *const PhysicalNic) bool {
+        return (self.flags & socket.IFF.UP) != 0;
+    }
+};
+
+/// Read a sysfs file and return its trimmed content
+fn readSysfs(path_z: [*:0]const u8, out: []u8) !usize {
+    const fd_result = linux.open(path_z, .{ .ACCMODE = .RDONLY }, 0);
+    if (@as(isize, @bitCast(fd_result)) < 0) {
+        return error.SysfsReadFailed;
+    }
+    const fd: i32 = @intCast(fd_result);
+    defer _ = linux.close(fd);
+
+    const read_result = linux.read(fd, out.ptr, out.len);
+    if (@as(isize, @bitCast(read_result)) < 0) {
+        return error.SysfsReadFailed;
+    }
+    const len: usize = @intCast(read_result);
+
+    // Trim trailing newline
+    if (len > 0 and out[len - 1] == '\n') {
+        return len - 1;
+    }
+    return len;
+}
+
+/// Get physical network interfaces (real hardware NICs, not virtual)
+/// Physical NICs are identified by: no link_kind, not loopback, /sys/class/net/<name>/device exists
+pub fn getPhysicalInterfaces(allocator: std.mem.Allocator) ![]PhysicalNic {
+    const interfaces = try getInterfaces(allocator);
+    defer allocator.free(interfaces);
+
+    var nics = std.ArrayList(PhysicalNic).init(allocator);
+    errdefer nics.deinit();
+
+    for (interfaces) |iface| {
+        // Skip virtual interfaces (those with a link_kind)
+        if (iface.link_kind_len > 0) continue;
+        // Skip loopback
+        if (iface.isLoopback()) continue;
+        // Skip interfaces without a MAC address
+        if (!iface.has_mac) continue;
+
+        // Check if /sys/class/net/<name>/device exists (indicates physical device)
+        var device_path: [65]u8 = undefined;
+        const iface_name = iface.getName();
+        const written = std.fmt.bufPrint(device_path[0..64], "/sys/class/net/{s}/device", .{iface_name}) catch continue;
+        device_path[written.len] = 0;
+        const device_path_z: [*:0]const u8 = @ptrCast(device_path[0..written.len :0]);
+
+        const open_result = linux.open(device_path_z, .{ .ACCMODE = .RDONLY, .DIRECTORY = true }, 0);
+        if (@as(isize, @bitCast(open_result)) < 0) {
+            continue; // Not a physical device
+        }
+        _ = linux.close(@intCast(open_result));
+
+        var nic = PhysicalNic{
+            .name = undefined,
+            .name_len = iface.name_len,
+            .index = iface.index,
+            .mac = iface.mac,
+            .flags = iface.flags,
+            .mtu = iface.mtu,
+            .speed = null,
+            .duplex = undefined,
+            .duplex_len = 0,
+        };
+        @memset(&nic.name, 0);
+        @memcpy(nic.name[0..iface.name_len], iface.name[0..iface.name_len]);
+        @memset(&nic.duplex, 0);
+
+        // Read speed from sysfs
+        var speed_path: [65]u8 = undefined;
+        const speed_written = std.fmt.bufPrint(speed_path[0..64], "/sys/class/net/{s}/speed", .{iface_name}) catch continue;
+        speed_path[speed_written.len] = 0;
+        const speed_path_z: [*:0]const u8 = @ptrCast(speed_path[0..speed_written.len :0]);
+        var speed_buf: [16]u8 = undefined;
+        if (readSysfs(speed_path_z, &speed_buf)) |len| {
+            if (len > 0) {
+                nic.speed = std.fmt.parseInt(u32, speed_buf[0..len], 10) catch null;
+            }
+        } else |_| {}
+
+        // Read duplex from sysfs
+        var duplex_path: [65]u8 = undefined;
+        const duplex_written = std.fmt.bufPrint(duplex_path[0..64], "/sys/class/net/{s}/duplex", .{iface_name}) catch continue;
+        duplex_path[duplex_written.len] = 0;
+        const duplex_path_z: [*:0]const u8 = @ptrCast(duplex_path[0..duplex_written.len :0]);
+        if (readSysfs(duplex_path_z, &nic.duplex)) |len| {
+            nic.duplex_len = len;
+        } else |_| {}
+
+        try nics.append(nic);
+    }
+
+    return nics.toOwnedSlice();
+}
+
+/// Verify an interface exists by name (post-operation verification)
+pub fn verifyInterfaceExists(allocator: std.mem.Allocator, name: []const u8) !Interface {
+    const maybe_iface = try getInterfaceByName(allocator, name);
+    return maybe_iface orelse error.VerificationFailed;
 }
