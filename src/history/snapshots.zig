@@ -161,7 +161,7 @@ pub const SnapshotManager = struct {
 
     /// List all available snapshots
     pub fn listSnapshots(self: *Self) ![]SnapshotInfo {
-        var snapshots = std.ArrayList(SnapshotInfo).init(self.allocator);
+        var snapshots = std.array_list.Managed(SnapshotInfo).init(self.allocator);
         errdefer snapshots.deinit();
 
         var dir = std.fs.openDirAbsolute(self.snapshot_dir, .{ .iterate = true }) catch {

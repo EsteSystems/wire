@@ -47,14 +47,14 @@ pub const ExecuteError = error{
 /// Command executor - bridges parser to netlink operations
 pub const Executor = struct {
     allocator: std.mem.Allocator,
-    stdout: std.fs.File.Writer,
+    stdout: std.fs.File.DeprecatedWriter,
 
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
             .allocator = allocator,
-            .stdout = std.io.getStdOut().writer(),
+            .stdout = std.fs.File.stdout().deprecatedWriter(),
         };
     }
 

@@ -94,7 +94,7 @@ pub const ValidationIssue = struct {
 
 /// Result of pre-apply validation
 pub const ValidationReport = struct {
-    issues: std.ArrayList(ValidationIssue),
+    issues: std.array_list.Managed(ValidationIssue),
     errors: usize,
     warnings: usize,
     infos: usize,
@@ -103,7 +103,7 @@ pub const ValidationReport = struct {
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
-            .issues = std.ArrayList(ValidationIssue).init(allocator),
+            .issues = std.array_list.Managed(ValidationIssue).init(allocator),
             .errors = 0,
             .warnings = 0,
             .infos = 0,

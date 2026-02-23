@@ -8,7 +8,7 @@ const probe = @import("probe.zig");
 /// Validation result
 pub const ValidationResult = struct {
     passed: bool,
-    checks: std.ArrayList(Check),
+    checks: std.array_list.Managed(Check),
 
     pub const Check = struct {
         name: []const u8,
@@ -19,7 +19,7 @@ pub const ValidationResult = struct {
     pub fn init(allocator: std.mem.Allocator) ValidationResult {
         return .{
             .passed = true,
-            .checks = std.ArrayList(Check).init(allocator),
+            .checks = std.array_list.Managed(Check).init(allocator),
         };
     }
 

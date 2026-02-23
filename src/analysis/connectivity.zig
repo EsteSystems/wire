@@ -46,14 +46,14 @@ pub const CheckResult = struct {
 /// Connectivity analyzer
 pub const ConnectivityAnalyzer = struct {
     allocator: std.mem.Allocator,
-    results: std.ArrayList(CheckResult),
+    results: std.array_list.Managed(CheckResult),
 
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
             .allocator = allocator,
-            .results = std.ArrayList(CheckResult).init(allocator),
+            .results = std.array_list.Managed(CheckResult).init(allocator),
         };
     }
 
@@ -117,7 +117,7 @@ pub const ConnectivityAnalyzer = struct {
         defer file.close();
 
         var buf: [4096]u8 = undefined;
-        const content = file.reader().readAll(&buf) catch {
+        const content = file.readAll(&buf) catch {
             try self.addResult(.warning, "Could not read /etc/resolv.conf", null);
             return;
         };

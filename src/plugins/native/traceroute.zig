@@ -47,7 +47,7 @@ pub const TraceHop = struct {
 pub const TraceResult = struct {
     target: []const u8,
     target_ip: [4]u8,
-    hops: std.ArrayList(TraceHop),
+    hops: std.array_list.Managed(TraceHop),
     reached: bool,
     allocator: std.mem.Allocator,
 
@@ -57,7 +57,7 @@ pub const TraceResult = struct {
         return Self{
             .target = target,
             .target_ip = target_ip,
-            .hops = std.ArrayList(TraceHop).init(allocator),
+            .hops = std.array_list.Managed(TraceHop).init(allocator),
             .reached = false,
             .allocator = allocator,
         };

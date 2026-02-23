@@ -46,7 +46,7 @@ pub const ConfigLoadError = struct {
 pub const ConfigLoader = struct {
     allocator: std.mem.Allocator,
     base_path: []const u8,
-    errors: std.ArrayList(ConfigLoadError),
+    errors: std.array_list.Managed(ConfigLoadError),
 
     const Self = @This();
 
@@ -54,7 +54,7 @@ pub const ConfigLoader = struct {
         return Self{
             .allocator = allocator,
             .base_path = "/etc/wire",
-            .errors = std.ArrayList(ConfigLoadError).init(allocator),
+            .errors = std.array_list.Managed(ConfigLoadError).init(allocator),
         };
     }
 
@@ -140,7 +140,7 @@ pub fn validateConfig(path: []const u8, allocator: std.mem.Allocator) !Validatio
     var valid_count: usize = 0;
     const warning_count: usize = 0;
     var error_count: usize = 0;
-    var error_messages = std.ArrayList([]const u8).init(allocator);
+    var error_messages = std.array_list.Managed([]const u8).init(allocator);
     defer error_messages.deinit();
 
     for (loaded.commands) |*cmd| {
@@ -185,7 +185,7 @@ pub const ValidationReport = struct {
 
 /// Apply configuration from a file
 pub fn applyConfig(path: []const u8, allocator: std.mem.Allocator, options: ApplyOptions) !ApplyResult {
-    const stdout = std.io.getStdOut().writer();
+    const stdout = std.fs.File.stdout().deprecatedWriter();
 
     var loader = ConfigLoader.init(allocator);
     defer loader.deinit();

@@ -96,7 +96,7 @@ pub fn getInterfaces(allocator: std.mem.Allocator) ![]Interface {
     defer allocator.free(response);
 
     // Parse responses
-    var interfaces = std.ArrayList(Interface).init(allocator);
+    var interfaces = std.array_list.Managed(Interface).init(allocator);
     errdefer interfaces.deinit();
 
     var offset: usize = 0;
@@ -371,7 +371,7 @@ pub fn getPhysicalInterfaces(allocator: std.mem.Allocator) ![]PhysicalNic {
     const interfaces = try getInterfaces(allocator);
     defer allocator.free(interfaces);
 
-    var nics = std.ArrayList(PhysicalNic).init(allocator);
+    var nics = std.array_list.Managed(PhysicalNic).init(allocator);
     errdefer nics.deinit();
 
     for (interfaces) |iface| {

@@ -40,14 +40,14 @@ pub const ValidationError = struct {
 /// Validator for wire commands
 pub const Validator = struct {
     allocator: std.mem.Allocator,
-    errors: std.ArrayList(ValidationError),
+    errors: std.array_list.Managed(ValidationError),
 
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
             .allocator = allocator,
-            .errors = std.ArrayList(ValidationError).init(allocator),
+            .errors = std.array_list.Managed(ValidationError).init(allocator),
         };
     }
 

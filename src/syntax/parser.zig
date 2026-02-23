@@ -200,7 +200,7 @@ pub const Parser = struct {
         const action = self.parseAction() catch Action{ .none = {} };
 
         // Parse attributes
-        var attrs = std.ArrayList(Attribute).init(self.allocator);
+        var attrs = std.array_list.Managed(Attribute).init(self.allocator);
         errdefer attrs.deinit();
 
         while (!self.isAtEnd() and !self.check(.NEWLINE) and !self.check(.PIPE) and !self.check(.EOF)) {
@@ -225,7 +225,7 @@ pub const Parser = struct {
     ///                     state up
     ///                     address 10.0.0.1/24
     pub fn parseCommands(self: *Self) ParseError![]Command {
-        var commands = std.ArrayList(Command).init(self.allocator);
+        var commands = std.array_list.Managed(Command).init(self.allocator);
         errdefer {
             for (commands.items) |*cmd| {
                 cmd.deinit(self.allocator);
@@ -277,7 +277,7 @@ pub const Parser = struct {
                 // Regular command format - continue parsing action
                 const action = self.parseAction() catch Action{ .none = {} };
 
-                var attrs = std.ArrayList(Attribute).init(self.allocator);
+                var attrs = std.array_list.Managed(Attribute).init(self.allocator);
                 errdefer attrs.deinit();
 
                 while (!self.isAtEnd() and !self.check(.NEWLINE) and !self.check(.PIPE) and !self.check(.EOF)) {
@@ -321,7 +321,7 @@ pub const Parser = struct {
                         _ = self.advance();
                         action = Action{ .add = .{ .value = null } };
                         // Collect member names
-                        var member_list = std.ArrayList(u8).init(self.allocator);
+                        var member_list = std.array_list.Managed(u8).init(self.allocator);
                         defer member_list.deinit();
                         while (!self.isAtEnd() and self.check(.IDENTIFIER)) {
                             if (member_list.items.len > 0) {
@@ -360,7 +360,7 @@ pub const Parser = struct {
                         _ = self.advance();
                         action = Action{ .add = .{ .value = null } };
                         // Collect port names
-                        var port_list = std.ArrayList(u8).init(self.allocator);
+                        var port_list = std.array_list.Managed(u8).init(self.allocator);
                         defer port_list.deinit();
                         while (!self.isAtEnd() and self.check(.IDENTIFIER)) {
                             if (port_list.items.len > 0) {
@@ -468,7 +468,7 @@ pub const Parser = struct {
                 }
 
                 // Collect remaining tokens as args
-                var args_list = std.ArrayList(u8).init(self.allocator);
+                var args_list = std.array_list.Managed(u8).init(self.allocator);
                 defer args_list.deinit();
 
                 while (!self.isAtEnd() and !self.check(.NEWLINE) and !self.check(.PIPE) and !self.check(.EOF)) {
@@ -542,7 +542,7 @@ pub const Parser = struct {
                 }
 
                 // Collect remaining tokens as args
-                var args_list = std.ArrayList(u8).init(self.allocator);
+                var args_list = std.array_list.Managed(u8).init(self.allocator);
                 defer args_list.deinit();
 
                 while (!self.isAtEnd() and !self.check(.NEWLINE) and !self.check(.PIPE) and !self.check(.EOF)) {
@@ -582,7 +582,7 @@ pub const Parser = struct {
     }
 
     /// Parse block format sub-commands for an interface
-    fn parseBlockCommands(self: *Self, commands: *std.ArrayList(Command), interface_name: []const u8) ParseError!void {
+    fn parseBlockCommands(self: *Self, commands: *std.array_list.Managed(Command), interface_name: []const u8) ParseError!void {
         while (!self.isAtEnd()) {
             // Skip empty lines
             if (self.check(.NEWLINE)) {
@@ -876,7 +876,7 @@ pub const Parser = struct {
             .MEMBERS => {
                 _ = self.advance();
                 // Collect all following identifiers as members
-                var members = std.ArrayList(u8).init(self.allocator);
+                var members = std.array_list.Managed(u8).init(self.allocator);
                 defer members.deinit();
 
                 while (!self.isAtEnd() and self.check(.IDENTIFIER)) {

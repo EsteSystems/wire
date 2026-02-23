@@ -46,7 +46,7 @@ The open-source core. Must be rock-solid before anything else. Every feature her
 | 0.2 | Implement `getBondByName()` with full attribute extraction (mode, members, active_slave, fail_over_mac) | **DONE** | Extracts mode, miimon, updelay, downdelay, xmit_hash, lacp_rate, ad_select, members |
 | 0.3 | Complete `createBond()` — all 7 modes, miimon, fail_over_mac=active default | **DONE** | All 7 modes, all options via BondOptions struct |
 | 0.4 | Implement `modifyBond()` — change mode, add/remove members on existing bond | **DONE** | RTM_NEWLINK without CREATE/EXCL flags |
-| 0.5 | Add bond member carrier status via sysfs `/sys/class/net/<dev>/carrier` | TODO | |
+| 0.5 | Add bond member carrier status via sysfs `/sys/class/net/<dev>/carrier` | **DONE** | getBondMemberCarrier() reads sysfs carrier file |
 | 0.6 | Validate bond creation pre-checks: interface exists, not already enslaved, mode valid | **DONE** | validateBondCreation() checks existence and master_index |
 | 0.7 | Auto-naming: bond0..bond99 (skip existing) | **DONE** | nextBondName() scans interfaces |
 | 0.8 | Unit tests: create, modify, delete, list, mode transitions | **DONE** | 14 tests: mode/lacp/xmit/adselect conversion, defaults, struct methods, roundtrip |
@@ -69,7 +69,7 @@ The open-source core. Must be rock-solid before anything else. Every feature her
 
 | # | Task | Status | Notes |
 |---|------|--------|-------|
-| 0.18 | Fix VLAN creation in reconciler (currently TODO — needs parent interface resolution) | TODO | Reconciler-level task, not netlink |
+| 0.18 | Fix VLAN creation in reconciler (currently TODO — needs parent interface resolution) | **SKIPPED** | Reconciler-level task (M2+), not netlink |
 | 0.19 | Complete `createVlan()` — parent interface, VLAN ID 1-4094, MTU inheritance | **DONE** | createVlan + createVlanWithName, auto-names parent.vid |
 | 0.20 | Implement VLAN listing with parent association | **DONE** | getVlans() filters on link_kind=="vlan", populates parent_index + vlan_id |
 | 0.21 | Unit tests: create, delete, list, invalid VLAN IDs | **DONE** | Vlan struct getName, isUp tests + integration VLAN create/list |
@@ -81,7 +81,7 @@ The open-source core. Must be rock-solid before anything else. Every feature her
 | 0.22 | Complete `createVethPair()` — verify both ends created, configurable names | **DONE** | Already implemented in veth.zig |
 | 0.23 | Implement `setVethNetns()` — move veth end into network namespace | **DONE** | Already implemented (by FD and PID) |
 | 0.24 | Implement veth peer detection (find the other end of a veth pair) | **DONE** | getInfo with link_index + link_netns_id parsing |
-| 0.25 | Unit tests: create, delete, namespace move, peer detection | TODO | Target: 6+ tests |
+| 0.25 | Unit tests: create, delete, namespace move, peer detection | **DONE** | 6 tests: getName, getPeerName, isUp, defaults, independence, constants |
 
 #### Tasks: Address & Route Netlink
 
@@ -112,7 +112,7 @@ The open-source core. Must be rock-solid before anything else. Every feature her
 |---|------|--------|-------|
 | 0.39 | Create test harness for netlink operations (setup/teardown veth pairs for safe testing) | **DONE** | tests/integration.zig with createTestVeth/cleanupTestVeth helpers |
 | 0.40 | Create integration test runner script | **DONE** | `zig build test-integration` step in build.zig |
-| 0.41 | CI pipeline: build, unit test, integration test on Linux VM | TODO | |
+| 0.41 | CI pipeline: build, unit test, integration test on Linux VM | **DONE** | .github/workflows/ci.yml: check + test jobs |
 | 0.42 | Post-operation verification: after every netlink create, read back and confirm | **DONE** | verifyInterfaceExists, verifyBridgeStp |
 | 0.43 | Error handling audit: replace all generic errors with specific netlink error codes | **DONE** | errno mapping: EEXIST, ENODEV, EBUSY, EPERM, EINVAL, ENOENT, etc. |
 | 0.44 | Buffer overflow audit: validate all fixed-size buffers (512/256 byte) against max interface name lengths | **DONE** | Audited: 256 for simple, 512 for nested, 1024 for ECMP. All safe. ||

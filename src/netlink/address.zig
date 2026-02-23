@@ -73,7 +73,7 @@ pub fn getAddresses(allocator: std.mem.Allocator) ![]Address {
     const response = try nl.request(msg, allocator);
     defer allocator.free(response);
 
-    var addresses = std.ArrayList(Address).init(allocator);
+    var addresses = std.array_list.Managed(Address).init(allocator);
     errdefer addresses.deinit();
 
     var offset: usize = 0;
@@ -145,7 +145,7 @@ pub fn getAddressesForInterface(allocator: std.mem.Allocator, if_index: u32) ![]
     const all = try getAddresses(allocator);
     defer allocator.free(all);
 
-    var filtered = std.ArrayList(Address).init(allocator);
+    var filtered = std.array_list.Managed(Address).init(allocator);
     errdefer filtered.deinit();
 
     for (all) |addr| {

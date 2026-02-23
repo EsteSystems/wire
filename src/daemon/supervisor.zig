@@ -127,7 +127,7 @@ pub const Supervisor = struct {
         self.ipc_server = ipc.IpcServer.init(self.allocator, self.config.socket_path);
         if (self.ipc_server) |*server| {
             server.start() catch |err| {
-                const stdout = std.io.getStdOut().writer();
+                const stdout = std.fs.File.stdout().deprecatedWriter();
                 stdout.print("Warning: Failed to start IPC server: {}\n", .{err}) catch {};
                 self.ipc_server = null;
             };
@@ -136,12 +136,12 @@ pub const Supervisor = struct {
         // Create config file watcher
         if (self.config.watch_config) {
             self.config_watcher = watcher.ConfigWatcher.init(self.allocator, self.config.config_path) catch |err| blk: {
-                const stdout = std.io.getStdOut().writer();
+                const stdout = std.fs.File.stdout().deprecatedWriter();
                 stdout.print("Warning: Failed to start config watcher: {}\n", .{err}) catch {};
                 break :blk null;
             };
             if (self.config_watcher != null) {
-                const stdout = std.io.getStdOut().writer();
+                const stdout = std.fs.File.stdout().deprecatedWriter();
                 stdout.print("Watching config file for changes: {s}\n", .{self.config.config_path}) catch {};
             }
         }
@@ -162,7 +162,7 @@ pub const Supervisor = struct {
 
     /// Main event loop
     fn runLoop(self: *Self) !void {
-        const stdout = std.io.getStdOut().writer();
+        const stdout = std.fs.File.stdout().deprecatedWriter();
         try stdout.print("wire daemon started (pid: {d})\n", .{self.pid});
 
         var last_reconcile = std.time.timestamp();
@@ -222,7 +222,7 @@ pub const Supervisor = struct {
 
     /// Perform reconciliation
     fn reconcile(self: *Self) !void {
-        const stdout = std.io.getStdOut().writer();
+        const stdout = std.fs.File.stdout().deprecatedWriter();
 
         if (self.desired_state == null) {
             return;
@@ -277,7 +277,7 @@ pub const Supervisor = struct {
 
     /// Create initial snapshot at daemon start
     fn createInitialSnapshot(self: *Self) !void {
-        const stdout = std.io.getStdOut().writer();
+        const stdout = std.fs.File.stdout().deprecatedWriter();
 
         // Query live state
         var live = state_live.queryLiveState(self.allocator) catch |err| {
@@ -319,7 +319,7 @@ pub const Supervisor = struct {
         self.last_snapshot = snapshot.timestamp;
 
         if (self.config.verbose) {
-            const stdout = std.io.getStdOut().writer();
+            const stdout = std.fs.File.stdout().deprecatedWriter();
             stdout.print("Created snapshot at {d}\n", .{snapshot.timestamp}) catch {};
         }
     }

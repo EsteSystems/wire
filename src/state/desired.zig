@@ -102,7 +102,7 @@ fn processBondCommand(
                 .miimon = 100,
                 .updelay = 0,
                 .downdelay = 0,
-                .members = std.ArrayList(i32).init(state.allocator),
+                .members = std.array_list.Managed(i32).init(state.allocator),
             };
 
             @memcpy(bond_state.name[0..name.len], name);
@@ -164,7 +164,7 @@ fn processBridgeCommand(
                 .forward_delay = 15,
                 .max_age = 20,
                 .hello_time = 2,
-                .ports = std.ArrayList(i32).init(state.allocator),
+                .ports = std.array_list.Managed(i32).init(state.allocator),
             };
 
             @memcpy(bridge_state.name[0..name.len], name);

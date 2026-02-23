@@ -224,3 +224,95 @@ test "VETH_INFO constants" {
     try std.testing.expectEqual(@as(u16, 0), VETH_INFO.UNSPEC);
     try std.testing.expectEqual(@as(u16, 1), VETH_INFO.PEER);
 }
+
+test "Veth getName" {
+    var veth = Veth{
+        .name = undefined,
+        .name_len = 5,
+        .index = 1,
+        .peer_index = 2,
+        .peer_name = undefined,
+        .peer_name_len = 5,
+        .flags = 0,
+    };
+    @memset(&veth.name, 0);
+    @memcpy(veth.name[0..5], "veth0");
+    @memset(&veth.peer_name, 0);
+    @memcpy(veth.peer_name[0..5], "veth1");
+    try std.testing.expectEqualStrings("veth0", veth.getName());
+}
+
+test "Veth getPeerName" {
+    var veth = Veth{
+        .name = undefined,
+        .name_len = 5,
+        .index = 1,
+        .peer_index = 2,
+        .peer_name = undefined,
+        .peer_name_len = 5,
+        .flags = 0,
+    };
+    @memset(&veth.name, 0);
+    @memcpy(veth.name[0..5], "veth0");
+    @memset(&veth.peer_name, 0);
+    @memcpy(veth.peer_name[0..5], "veth1");
+    try std.testing.expectEqualStrings("veth1", veth.getPeerName());
+}
+
+test "Veth isUp flag" {
+    var veth = Veth{
+        .name = undefined,
+        .name_len = 5,
+        .index = 1,
+        .peer_index = 2,
+        .peer_name = undefined,
+        .peer_name_len = 0,
+        .flags = socket.IFF.UP | socket.IFF.BROADCAST,
+    };
+    @memset(&veth.name, 0);
+    @memset(&veth.peer_name, 0);
+    try std.testing.expect(veth.isUp());
+
+    veth.flags = 0;
+    try std.testing.expect(!veth.isUp());
+}
+
+test "Veth default peer fields" {
+    var veth = Veth{
+        .name = undefined,
+        .name_len = 4,
+        .index = 10,
+        .peer_index = 0,
+        .peer_name = undefined,
+        .peer_name_len = 0,
+        .flags = 0,
+    };
+    @memset(&veth.name, 0);
+    @memcpy(veth.name[0..4], "eth0");
+    @memset(&veth.peer_name, 0);
+
+    // When no peer is known, peer_index is 0 and peer_name_len is 0
+    try std.testing.expectEqual(@as(i32, 0), veth.peer_index);
+    try std.testing.expectEqual(@as(usize, 0), veth.peer_name_len);
+    try std.testing.expectEqualStrings("", veth.getPeerName());
+}
+
+test "Veth name and peer name independence" {
+    var veth = Veth{
+        .name = undefined,
+        .name_len = 6,
+        .index = 3,
+        .peer_index = 4,
+        .peer_name = undefined,
+        .peer_name_len = 7,
+        .flags = socket.IFF.UP,
+    };
+    @memset(&veth.name, 0);
+    @memcpy(veth.name[0..6], "mynet0");
+    @memset(&veth.peer_name, 0);
+    @memcpy(veth.peer_name[0..7], "mynet0p");
+
+    try std.testing.expectEqualStrings("mynet0", veth.getName());
+    try std.testing.expectEqualStrings("mynet0p", veth.getPeerName());
+    try std.testing.expect(veth.isUp());
+}

@@ -18,8 +18,8 @@ const Node = struct {
     command: *const parser.Command,
     name: []const u8,
     node_type: NodeType,
-    dependencies: std.ArrayList(usize),
-    dependents: std.ArrayList(usize),
+    dependencies: std.array_list.Managed(usize),
+    dependents: std.array_list.Managed(usize),
     visited: bool = false,
     in_stack: bool = false,
 
@@ -28,8 +28,8 @@ const Node = struct {
             .command = cmd,
             .name = getCommandName(cmd),
             .node_type = getNodeType(cmd),
-            .dependencies = std.ArrayList(usize).init(allocator),
-            .dependents = std.ArrayList(usize).init(allocator),
+            .dependencies = std.array_list.Managed(usize).init(allocator),
+            .dependents = std.array_list.Managed(usize).init(allocator),
         };
     }
 
@@ -109,7 +109,7 @@ fn getCommandName(cmd: *const parser.Command) []const u8 {
 /// Dependency resolver
 pub const Resolver = struct {
     allocator: std.mem.Allocator,
-    nodes: std.ArrayList(Node),
+    nodes: std.array_list.Managed(Node),
     name_to_index: std.StringHashMap(usize),
 
     const Self = @This();
@@ -117,7 +117,7 @@ pub const Resolver = struct {
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
             .allocator = allocator,
-            .nodes = std.ArrayList(Node).init(allocator),
+            .nodes = std.array_list.Managed(Node).init(allocator),
             .name_to_index = std.StringHashMap(usize).init(allocator),
         };
     }
@@ -212,7 +212,7 @@ pub const Resolver = struct {
 
     /// Resolve dependencies and return commands in correct execution order
     pub fn resolve(self: *Self) ![]const *const parser.Command {
-        var result = std.ArrayList(*const parser.Command).init(self.allocator);
+        var result = std.array_list.Managed(*const parser.Command).init(self.allocator);
         errdefer result.deinit();
 
         // Topological sort using Kahn's algorithm
@@ -225,7 +225,7 @@ pub const Resolver = struct {
         }
 
         // Queue of nodes with no dependencies
-        var queue = std.ArrayList(usize).init(self.allocator);
+        var queue = std.array_list.Managed(usize).init(self.allocator);
         defer queue.deinit();
 
         for (0..self.nodes.items.len) |i| {

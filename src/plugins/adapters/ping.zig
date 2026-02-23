@@ -98,7 +98,7 @@ pub fn ping(allocator: std.mem.Allocator, target: []const u8, options: PingOptio
     }
 
     // Build ping command arguments
-    var args = std.ArrayList([]const u8).init(allocator);
+    var args = std.array_list.Managed([]const u8).init(allocator);
     defer args.deinit();
 
     // Count

@@ -54,14 +54,14 @@ pub const HealthCheck = struct {
 /// Health analyzer
 pub const HealthAnalyzer = struct {
     allocator: std.mem.Allocator,
-    checks: std.ArrayList(HealthCheck),
+    checks: std.array_list.Managed(HealthCheck),
 
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
             .allocator = allocator,
-            .checks = std.ArrayList(HealthCheck).init(allocator),
+            .checks = std.array_list.Managed(HealthCheck).init(allocator),
         };
     }
 

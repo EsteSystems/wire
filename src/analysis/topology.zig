@@ -102,8 +102,8 @@ pub const TopoEdge = struct {
 /// Topology graph - represents interface relationships
 pub const TopologyGraph = struct {
     allocator: std.mem.Allocator,
-    nodes: std.ArrayList(TopoNode),
-    edges: std.ArrayList(TopoEdge),
+    nodes: std.array_list.Managed(TopoNode),
+    edges: std.array_list.Managed(TopoEdge),
     // Index lookup for fast access
     index_map: std.AutoHashMap(i32, usize),
 
@@ -112,8 +112,8 @@ pub const TopologyGraph = struct {
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
             .allocator = allocator,
-            .nodes = std.ArrayList(TopoNode).init(allocator),
-            .edges = std.ArrayList(TopoEdge).init(allocator),
+            .nodes = std.array_list.Managed(TopoNode).init(allocator),
+            .edges = std.array_list.Managed(TopoEdge).init(allocator),
             .index_map = std.AutoHashMap(i32, usize).init(allocator),
         };
     }
@@ -220,7 +220,7 @@ pub const TopologyGraph = struct {
     /// Get children of a node (interfaces enslaved to it or VLANs on top of it)
     /// Note: Excludes veth peer relationships to prevent cycles in tree display
     pub fn getChildren(self: *const Self, parent_index: i32, allocator: std.mem.Allocator) ![]const TopoNode {
-        var children = std.ArrayList(TopoNode).init(allocator);
+        var children = std.array_list.Managed(TopoNode).init(allocator);
         errdefer children.deinit();
 
         for (self.edges.items) |edge| {
@@ -239,7 +239,7 @@ pub const TopologyGraph = struct {
 
     /// Get parent chain (walk up the hierarchy)
     pub fn getParentChain(self: *const Self, start_index: i32, allocator: std.mem.Allocator) ![]const TopoNode {
-        var chain = std.ArrayList(TopoNode).init(allocator);
+        var chain = std.array_list.Managed(TopoNode).init(allocator);
         errdefer chain.deinit();
 
         var current_index: ?i32 = start_index;
@@ -258,7 +258,7 @@ pub const TopologyGraph = struct {
 
     /// Get root nodes (nodes with no parent)
     pub fn getRootNodes(self: *const Self, allocator: std.mem.Allocator) ![]const TopoNode {
-        var roots = std.ArrayList(TopoNode).init(allocator);
+        var roots = std.array_list.Managed(TopoNode).init(allocator);
         errdefer roots.deinit();
 
         for (self.nodes.items) |node| {
@@ -306,7 +306,7 @@ pub const TopologyGraph = struct {
         }
 
         // Build path
-        var path = std.ArrayList(TopoNode).init(allocator);
+        var path = std.array_list.Managed(TopoNode).init(allocator);
         errdefer path.deinit();
 
         // Add source chain up to common
@@ -412,7 +412,7 @@ pub const TopologyGraph = struct {
         var result = PathValidation{
             .all_up = true,
             .all_have_carrier = true,
-            .issues = std.ArrayList(PathIssue).init(self.allocator),
+            .issues = std.array_list.Managed(PathIssue).init(self.allocator),
         };
 
         for (path) |node| {
@@ -459,7 +459,7 @@ pub const PathIssue = struct {
 pub const PathValidation = struct {
     all_up: bool,
     all_have_carrier: bool,
-    issues: std.ArrayList(PathIssue),
+    issues: std.array_list.Managed(PathIssue),
 
     pub fn deinit(self: *PathValidation) void {
         self.issues.deinit();

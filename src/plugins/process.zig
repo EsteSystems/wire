@@ -51,7 +51,7 @@ pub const ProcessManager = struct {
         _ = timeout_ms; // TODO: implement proper timeout with threads
 
         // Build full argument list (program name + args)
-        var argv = std.ArrayList([]const u8).init(self.allocator);
+        var argv = std.array_list.Managed([]const u8).init(self.allocator);
         defer argv.deinit();
 
         try argv.append(program);
@@ -109,7 +109,7 @@ pub const ProcessManager = struct {
 
     /// Run a simple command string (split by spaces)
     pub fn runSimple(self: *Self, command: []const u8) !ProcessResult {
-        var args = std.ArrayList([]const u8).init(self.allocator);
+        var args = std.array_list.Managed([]const u8).init(self.allocator);
         defer args.deinit();
 
         // Simple space-based split (doesn't handle quotes)

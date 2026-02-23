@@ -58,6 +58,7 @@ pub fn build(b: *std.Build) void {
         "src/netlink/bridge.zig",
         "src/netlink/vlan.zig",
         "src/netlink/neighbor.zig",
+        "src/netlink/veth.zig",
     };
 
     for (netlink_test_files) |test_file| {

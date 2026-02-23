@@ -278,7 +278,7 @@ pub const ChangeLogger = struct {
 
     /// Read all entries
     pub fn readAll(self: *Self) ![]ChangeEntry {
-        var entries = std.ArrayList(ChangeEntry).init(self.allocator);
+        var entries = std.array_list.Managed(ChangeEntry).init(self.allocator);
         errdefer entries.deinit();
 
         const file = std.fs.openFileAbsolute(self.log_path, .{}) catch {

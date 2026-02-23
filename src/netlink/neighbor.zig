@@ -168,7 +168,7 @@ pub fn getNeighbors(allocator: std.mem.Allocator) ![]NeighborEntry {
     defer allocator.free(response);
 
     // Parse responses
-    var neighbors = std.ArrayList(NeighborEntry).init(allocator);
+    var neighbors = std.array_list.Managed(NeighborEntry).init(allocator);
     errdefer neighbors.deinit();
 
     var offset: usize = 0;
@@ -241,7 +241,7 @@ pub fn getArpTable(allocator: std.mem.Allocator) ![]NeighborEntry {
     const all = try getNeighbors(allocator);
     defer allocator.free(all);
 
-    var arp_entries = std.ArrayList(NeighborEntry).init(allocator);
+    var arp_entries = std.array_list.Managed(NeighborEntry).init(allocator);
     errdefer arp_entries.deinit();
 
     for (all) |entry| {
@@ -258,7 +258,7 @@ pub fn getNdpTable(allocator: std.mem.Allocator) ![]NeighborEntry {
     const all = try getNeighbors(allocator);
     defer allocator.free(all);
 
-    var ndp_entries = std.ArrayList(NeighborEntry).init(allocator);
+    var ndp_entries = std.array_list.Managed(NeighborEntry).init(allocator);
     errdefer ndp_entries.deinit();
 
     for (all) |entry| {
@@ -309,7 +309,7 @@ pub fn getNeighborsForInterface(allocator: std.mem.Allocator, if_index: i32) ![]
     const all = try getNeighbors(allocator);
     defer allocator.free(all);
 
-    var filtered = std.ArrayList(NeighborEntry).init(allocator);
+    var filtered = std.array_list.Managed(NeighborEntry).init(allocator);
     errdefer filtered.deinit();
 
     for (all) |entry| {

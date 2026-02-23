@@ -115,7 +115,7 @@ pub const StateExporter = struct {
 
     /// Export to string
     pub fn exportToString(self: *Self, state: *const types.NetworkState) ![]u8 {
-        var list = std.ArrayList(u8).init(self.allocator);
+        var list = std.array_list.Managed(u8).init(self.allocator);
         errdefer list.deinit();
 
         try self.exportToWriter(state, list.writer());
@@ -127,9 +127,8 @@ pub const StateExporter = struct {
         const file = try std.fs.cwd().createFile(path, .{});
         defer file.close();
 
-        var buffered = std.io.bufferedWriter(file.writer());
-        try self.exportToWriter(state, buffered.writer());
-        try buffered.flush();
+        const writer = file.deprecatedWriter();
+        try self.exportToWriter(state, writer);
     }
 
     fn exportBonds(self: *Self, state: *const types.NetworkState, writer: anytype) !void {

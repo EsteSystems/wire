@@ -229,7 +229,7 @@ pub const Lexer = struct {
 
     /// Tokenize entire input
     pub fn tokenize(self: *Self, allocator: std.mem.Allocator) ![]Token {
-        var tokens = std.ArrayList(Token).init(allocator);
+        var tokens = std.array_list.Managed(Token).init(allocator);
         errdefer tokens.deinit();
 
         while (true) {

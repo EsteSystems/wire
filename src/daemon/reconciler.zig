@@ -49,7 +49,7 @@ pub const ReconcilePolicy = struct {
 pub const Reconciler = struct {
     allocator: std.mem.Allocator,
     policy: ReconcilePolicy,
-    results: std.ArrayList(ReconcileResult),
+    results: std.array_list.Managed(ReconcileResult),
     stats: ReconcileStats,
 
     const Self = @This();
@@ -58,7 +58,7 @@ pub const Reconciler = struct {
         return Self{
             .allocator = allocator,
             .policy = policy,
-            .results = std.ArrayList(ReconcileResult).init(allocator),
+            .results = std.array_list.Managed(ReconcileResult).init(allocator),
             .stats = ReconcileStats{},
         };
     }
@@ -110,7 +110,7 @@ pub const Reconciler = struct {
             }
 
             if (retries < self.policy.max_retries) {
-                std.time.sleep(self.policy.retry_delay_ms * std.time.ns_per_ms);
+                std.Thread.sleep(self.policy.retry_delay_ms * std.time.ns_per_ms);
             }
         }
 
@@ -216,7 +216,7 @@ pub const Reconciler = struct {
                     };
                     // Wait for interface to be ready after bringing it up
                     if (d_up) {
-                        std.time.sleep(200 * std.time.ns_per_ms);
+                        std.Thread.sleep(200 * std.time.ns_per_ms);
                     }
                 }
 

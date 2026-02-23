@@ -154,7 +154,7 @@ pub fn getRules(allocator: std.mem.Allocator, family: u8) ![]Rule {
     const response = try nl.request(msg, allocator);
     defer allocator.free(response);
 
-    var rules = std.ArrayList(Rule).init(allocator);
+    var rules = std.array_list.Managed(Rule).init(allocator);
     errdefer rules.deinit();
 
     var offset: usize = 0;

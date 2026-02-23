@@ -93,7 +93,7 @@ pub const BondState = struct {
     miimon: u32,
     updelay: u32,
     downdelay: u32,
-    members: std.ArrayList(i32),
+    members: std.array_list.Managed(i32),
 
     pub const BondMode = enum(u8) {
         balance_rr = 0,
@@ -123,7 +123,7 @@ pub const BridgeState = struct {
     forward_delay: u32,
     max_age: u32,
     hello_time: u32,
-    ports: std.ArrayList(i32),
+    ports: std.array_list.Managed(i32),
 
     pub fn getName(self: *const BridgeState) []const u8 {
         return self.name[0..self.name_len];
@@ -163,13 +163,13 @@ pub const VethState = struct {
 /// Complete network state snapshot
 pub const NetworkState = struct {
     allocator: std.mem.Allocator,
-    interfaces: std.ArrayList(InterfaceState),
-    addresses: std.ArrayList(AddressState),
-    routes: std.ArrayList(RouteState),
-    bonds: std.ArrayList(BondState),
-    bridges: std.ArrayList(BridgeState),
-    vlans: std.ArrayList(VlanState),
-    veths: std.ArrayList(VethState),
+    interfaces: std.array_list.Managed(InterfaceState),
+    addresses: std.array_list.Managed(AddressState),
+    routes: std.array_list.Managed(RouteState),
+    bonds: std.array_list.Managed(BondState),
+    bridges: std.array_list.Managed(BridgeState),
+    vlans: std.array_list.Managed(VlanState),
+    veths: std.array_list.Managed(VethState),
     timestamp: i64,
 
     const Self = @This();
@@ -177,13 +177,13 @@ pub const NetworkState = struct {
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
             .allocator = allocator,
-            .interfaces = std.ArrayList(InterfaceState).init(allocator),
-            .addresses = std.ArrayList(AddressState).init(allocator),
-            .routes = std.ArrayList(RouteState).init(allocator),
-            .bonds = std.ArrayList(BondState).init(allocator),
-            .bridges = std.ArrayList(BridgeState).init(allocator),
-            .vlans = std.ArrayList(VlanState).init(allocator),
-            .veths = std.ArrayList(VethState).init(allocator),
+            .interfaces = std.array_list.Managed(InterfaceState).init(allocator),
+            .addresses = std.array_list.Managed(AddressState).init(allocator),
+            .routes = std.array_list.Managed(RouteState).init(allocator),
+            .bonds = std.array_list.Managed(BondState).init(allocator),
+            .bridges = std.array_list.Managed(BridgeState).init(allocator),
+            .vlans = std.array_list.Managed(VlanState).init(allocator),
+            .veths = std.array_list.Managed(VethState).init(allocator),
             .timestamp = std.time.timestamp(),
         };
     }
@@ -288,14 +288,14 @@ pub const StateChange = union(enum) {
 
 /// Result of comparing two states
 pub const StateDiff = struct {
-    changes: std.ArrayList(StateChange),
+    changes: std.array_list.Managed(StateChange),
     allocator: std.mem.Allocator,
 
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
-            .changes = std.ArrayList(StateChange).init(allocator),
+            .changes = std.array_list.Managed(StateChange).init(allocator),
             .allocator = allocator,
         };
     }

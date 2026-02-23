@@ -433,7 +433,7 @@ pub fn getBonds(allocator: std.mem.Allocator) ![]Bond {
     const interfaces = try interface.getInterfaces(allocator);
     defer allocator.free(interfaces);
 
-    var bonds = std.ArrayList(Bond).init(allocator);
+    var bonds = std.array_list.Managed(Bond).init(allocator);
     errdefer bonds.deinit();
 
     for (interfaces) |iface| {
@@ -527,6 +527,35 @@ pub fn getBonds(allocator: std.mem.Allocator) ![]Bond {
     }
 
     return bonds.toOwnedSlice();
+}
+
+/// Check if a bond member's physical link carrier is up via sysfs
+/// Reads /sys/class/net/<name>/carrier: "1" = up, "0" = down
+pub fn getBondMemberCarrier(member_name: []const u8) !bool {
+    if (member_name.len > 15) return error.InterfaceNameTooLong;
+
+    var path_buf: [48]u8 = undefined;
+    const path = std.fmt.bufPrint(&path_buf, "/sys/class/net/{s}/carrier", .{member_name}) catch return error.InterfaceNameTooLong;
+    // Null-terminate for syscall
+    path_buf[path.len] = 0;
+    const path_z: [*:0]const u8 = @ptrCast(path_buf[0..path.len :0]);
+
+    const fd_result = linux.open(path_z, .{ .ACCMODE = .RDONLY }, 0);
+    if (@as(isize, @bitCast(fd_result)) < 0) {
+        return error.SysfsReadFailed;
+    }
+    const fd: i32 = @intCast(fd_result);
+    defer _ = linux.close(fd);
+
+    var buf: [4]u8 = undefined;
+    const read_result = linux.read(fd, &buf, buf.len);
+    if (@as(isize, @bitCast(read_result)) < 0) {
+        return error.SysfsReadFailed;
+    }
+    const len: usize = @intCast(read_result);
+    if (len == 0) return false;
+
+    return buf[0] == '1';
 }
 
 /// Get bond by name
@@ -633,6 +662,11 @@ test "bond struct isUp" {
 
     bond.flags = 0;
     try std.testing.expect(!bond.isUp());
+}
+
+test "getBondMemberCarrier rejects too-long name" {
+    const result = getBondMemberCarrier("this_name_is_way_too_long_for_an_interface");
+    try std.testing.expectError(error.InterfaceNameTooLong, result);
 }
 
 test "bond mode roundtrip" {

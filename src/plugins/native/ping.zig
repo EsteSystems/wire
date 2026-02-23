@@ -344,7 +344,7 @@ pub const Pinger = struct {
         while (i < options.count) : (i += 1) {
             if (i > 0) {
                 // Wait interval between pings
-                std.time.sleep(options.interval_ms * std.time.ns_per_ms);
+                std.Thread.sleep(options.interval_ms * std.time.ns_per_ms);
             }
 
             const reply = try self.pingOnce(target_ip, options);

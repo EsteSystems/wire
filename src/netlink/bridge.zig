@@ -299,7 +299,7 @@ pub fn getBridgeFdb(allocator: std.mem.Allocator, bridge_name: []const u8) ![]Fd
     defer allocator.free(response);
 
     // Parse responses
-    var entries = std.ArrayList(FdbEntry).init(allocator);
+    var entries = std.array_list.Managed(FdbEntry).init(allocator);
     errdefer entries.deinit();
 
     var offset: usize = 0;
@@ -387,7 +387,7 @@ pub fn getAllFdb(allocator: std.mem.Allocator) ![]FdbEntry {
     defer allocator.free(response);
 
     // Parse responses
-    var entries = std.ArrayList(FdbEntry).init(allocator);
+    var entries = std.array_list.Managed(FdbEntry).init(allocator);
     errdefer entries.deinit();
 
     var offset: usize = 0;

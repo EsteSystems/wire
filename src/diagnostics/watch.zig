@@ -215,7 +215,7 @@ pub fn watch(config: WatchConfig, writer: anytype) !WatchStats {
 
         // Sleep for interval (unless this is the last iteration)
         if (config.max_iterations == null or iteration < config.max_iterations.?) {
-            std.time.sleep(@as(u64, config.interval_ms) * std.time.ns_per_ms);
+            std.Thread.sleep(@as(u64, config.interval_ms) * std.time.ns_per_ms);
         }
     }
 
@@ -272,7 +272,7 @@ pub fn watchInterface(allocator: std.mem.Allocator, iface_name: []const u8, inte
             try writer.print("ALERT: Interface {s} not found!\n", .{iface_name});
         }
 
-        std.time.sleep(@as(u64, interval_ms) * std.time.ns_per_ms);
+        std.Thread.sleep(@as(u64, interval_ms) * std.time.ns_per_ms);
     }
 }
 

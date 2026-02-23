@@ -57,14 +57,14 @@ pub const Guidance = struct {
 /// Operator guidance engine
 pub const OperatorGuidance = struct {
     allocator: std.mem.Allocator,
-    guidance: std.ArrayList(Guidance),
+    guidance: std.array_list.Managed(Guidance),
 
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
             .allocator = allocator,
-            .guidance = std.ArrayList(Guidance).init(allocator),
+            .guidance = std.array_list.Managed(Guidance).init(allocator),
         };
     }
 

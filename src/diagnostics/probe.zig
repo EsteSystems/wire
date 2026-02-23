@@ -88,8 +88,7 @@ pub fn lookupService(allocator: std.mem.Allocator, name: []const u8, protocol: ?
     };
     defer file.close();
 
-    var buf_reader = std.io.bufferedReader(file.reader());
-    var reader = buf_reader.reader();
+    const reader = file.deprecatedReader();
 
     var line_buf: [512]u8 = undefined;
 
@@ -125,7 +124,7 @@ pub fn lookupService(allocator: std.mem.Allocator, name: []const u8, protocol: ?
         // Check name match
         if (std.mem.eql(u8, service_name, name)) {
             // Collect aliases
-            var aliases = std.ArrayList([]const u8).init(allocator);
+            var aliases = std.array_list.Managed([]const u8).init(allocator);
             while (parts.next()) |alias| {
                 if (alias[0] == '#') break; // Comment starts
                 try aliases.append(try allocator.dupe(u8, alias));
@@ -179,8 +178,7 @@ pub fn lookupServicePort(name: []const u8, protocol: ?Protocol) !?u16 {
     };
     defer file.close();
 
-    var buf_reader = std.io.bufferedReader(file.reader());
-    var reader = buf_reader.reader();
+    const reader = file.deprecatedReader();
 
     var line_buf: [512]u8 = undefined;
 
@@ -428,7 +426,7 @@ pub fn probeTcp(target: []const u8, port: u16, timeout_ms: u32) ProbeResult {
 
 /// Probe multiple ports on a host
 pub fn probeMultiplePorts(allocator: std.mem.Allocator, target: []const u8, ports: []const u16, timeout_ms: u32) ![]ProbeResult {
-    var results = std.ArrayList(ProbeResult).init(allocator);
+    var results = std.array_list.Managed(ProbeResult).init(allocator);
     errdefer results.deinit();
 
     for (ports) |port| {

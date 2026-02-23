@@ -8,7 +8,7 @@ pub const ConfirmationSystem = struct {
     allocator: std.mem.Allocator,
     skip_confirmation: bool,
     stdin: std.fs.File,
-    stdout: std.fs.File.Writer,
+    stdout: std.fs.File.DeprecatedWriter,
 
     const Self = @This();
 
@@ -16,8 +16,8 @@ pub const ConfirmationSystem = struct {
         return Self{
             .allocator = allocator,
             .skip_confirmation = skip_confirmation,
-            .stdin = std.io.getStdIn(),
-            .stdout = std.io.getStdOut().writer(),
+            .stdin = std.fs.File.stdin(),
+            .stdout = std.fs.File.stdout().deprecatedWriter(),
         };
     }
 
@@ -76,7 +76,7 @@ pub const ConfirmationSystem = struct {
         try self.stdout.print("{s} [y/N]: ", .{prompt});
 
         var buf: [16]u8 = undefined;
-        const reader = self.stdin.reader();
+        const reader = self.stdin.deprecatedReader();
         const line = reader.readUntilDelimiter(&buf, '\n') catch {
             return false;
         };
@@ -99,7 +99,7 @@ pub const ConfirmationSystem = struct {
         try self.stdout.print("\nType 'yes' to confirm: ", .{});
 
         var buf: [16]u8 = undefined;
-        const reader = self.stdin.reader();
+        const reader = self.stdin.deprecatedReader();
         const line = reader.readUntilDelimiter(&buf, '\n') catch {
             return false;
         };

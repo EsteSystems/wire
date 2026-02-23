@@ -62,7 +62,7 @@ pub const WatchCallback = *const fn (event: WatchEvent, path: []const u8, userda
 pub const FileWatcher = struct {
     allocator: std.mem.Allocator,
     inotify_fd: i32,
-    watch_descriptors: std.ArrayList(WatchInfo),
+    watch_descriptors: std.array_list.Managed(WatchInfo),
     callback: ?WatchCallback,
     userdata: ?*anyopaque,
     running: bool,
@@ -84,7 +84,7 @@ pub const FileWatcher = struct {
         return Self{
             .allocator = allocator,
             .inotify_fd = @intCast(fd),
-            .watch_descriptors = std.ArrayList(WatchInfo).init(allocator),
+            .watch_descriptors = std.array_list.Managed(WatchInfo).init(allocator),
             .callback = null,
             .userdata = null,
             .running = true,

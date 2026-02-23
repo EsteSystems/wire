@@ -67,7 +67,10 @@ pub fn main() !void {
 
     // Execute command (handles --json flag internally)
     executeCommand(allocator, args[1..]) catch |err| {
-        const stderr = std.io.getStdErr().writer();
+        var stderr_buf: [4096]u8 = undefined;
+        var stderr_w = std.fs.File.stderr().writerStreaming(&stderr_buf);
+        const stderr = &stderr_w.interface;
+        defer stderr.flush() catch {};
         try stderr.print("Error: {}\n", .{err});
         std.process.exit(1);
     };
@@ -93,7 +96,7 @@ fn executeCommand(allocator: std.mem.Allocator, args: []const []const u8) !void 
     const post_cmd_args = args[cmd_idx + 1 ..];
 
     // Build handler args: if --json was global flag, prepend it so handlers can detect it
-    var handler_args_list = std.ArrayList([]const u8).init(allocator);
+    var handler_args_list = std.array_list.Managed([]const u8).init(allocator);
     defer handler_args_list.deinit();
 
     if (has_json) {
@@ -159,14 +162,20 @@ fn executeCommand(allocator: std.mem.Allocator, args: []const []const u8) !void 
     } else if (std.mem.eql(u8, subject, "watch")) {
         try handleWatch(allocator, handler_args);
     } else {
-        const stderr = std.io.getStdErr().writer();
+        var stderr_buf: [4096]u8 = undefined;
+        var stderr_w = std.fs.File.stderr().writerStreaming(&stderr_buf);
+        const stderr = &stderr_w.interface;
+        defer stderr.flush() catch {};
         try stderr.print("Unknown command: {s}\n", .{subject});
         try stderr.print("Run 'wire --help' for usage.\n", .{});
     }
 }
 
 fn handleInterface(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
     const use_json = json_output.hasJsonFlag(args);
     const filtered_args = try json_output.filterJsonFlag(allocator, args);
     defer allocator.free(filtered_args);
@@ -177,7 +186,7 @@ fn handleInterface(allocator: std.mem.Allocator, args: []const []const u8) !void
         defer allocator.free(interfaces);
 
         if (use_json) {
-            var json = json_output.JsonOutput.init(allocator);
+            var json = json_output.JsonOutput.init(allocator, stdout);
             // Collect addresses for each interface
             var addr_lists = try allocator.alloc([]const netlink_address.Address, interfaces.len);
             defer {
@@ -234,7 +243,7 @@ fn handleInterface(allocator: std.mem.Allocator, args: []const []const u8) !void
             defer allocator.free(addrs);
 
             if (use_json) {
-                var json = json_output.JsonOutput.init(allocator);
+                var json = json_output.JsonOutput.init(allocator, stdout);
                 try json.writeInterface(&iface, addrs);
                 try stdout.writeAll("\n");
                 return;
@@ -266,7 +275,7 @@ fn handleInterface(allocator: std.mem.Allocator, args: []const []const u8) !void
             }
         } else {
             if (use_json) {
-                var json = json_output.JsonOutput.init(allocator);
+                var json = json_output.JsonOutput.init(allocator, stdout);
                 try json.writeError("Interface not found");
                 return;
             }
@@ -350,7 +359,10 @@ fn handleInterface(allocator: std.mem.Allocator, args: []const []const u8) !void
 }
 
 fn handleRoute(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
     const use_json = json_output.hasJsonFlag(args);
     const filtered_args = try json_output.filterJsonFlag(allocator, args);
     defer allocator.free(filtered_args);
@@ -365,7 +377,7 @@ fn handleRoute(allocator: std.mem.Allocator, args: []const []const u8) !void {
         defer allocator.free(interfaces);
 
         if (use_json) {
-            var json = json_output.JsonOutput.init(allocator);
+            var json = json_output.JsonOutput.init(allocator, stdout);
             try json.writeRoutes(routes, interfaces);
             return;
         }
@@ -494,7 +506,10 @@ fn handleRoute(allocator: std.mem.Allocator, args: []const []const u8) !void {
 }
 
 fn handleAnalyze(allocator: std.mem.Allocator) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
 
     try stdout.print("\nNetwork Analysis Report\n", .{});
     try stdout.print("=======================\n\n", .{});
@@ -584,7 +599,10 @@ fn handleAnalyze(allocator: std.mem.Allocator) !void {
 }
 
 fn handleApply(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
 
     if (args.len == 0) {
         try stdout.print("Usage: wire apply <config-file> [options]\n", .{});
@@ -641,7 +659,10 @@ fn handleApply(allocator: std.mem.Allocator, args: []const []const u8) !void {
 }
 
 fn handleBond(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
     const use_json = json_output.hasJsonFlag(args);
     const filtered_args = try json_output.filterJsonFlag(allocator, args);
     defer allocator.free(filtered_args);
@@ -655,7 +676,7 @@ fn handleBond(allocator: std.mem.Allocator, args: []const []const u8) !void {
         defer allocator.free(bonds);
 
         if (use_json) {
-            var json = json_output.JsonOutput.init(allocator);
+            var json = json_output.JsonOutput.init(allocator, stdout);
             try json.writeBonds(bonds);
             return;
         }
@@ -859,7 +880,10 @@ fn showBondDetails(allocator: std.mem.Allocator, name: []const u8, stdout: anyty
 }
 
 fn handleBridge(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
 
     if (args.len == 0) {
         try stdout.print("Bridge commands:\n", .{});
@@ -1111,7 +1135,10 @@ fn showAllBridgeFdb(allocator: std.mem.Allocator, stdout: anytype) !void {
 }
 
 fn handleVlan(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
 
     if (args.len == 0) {
         try stdout.print("VLAN commands:\n", .{});
@@ -1191,7 +1218,10 @@ fn handleVlan(allocator: std.mem.Allocator, args: []const []const u8) !void {
 }
 
 fn handleVeth(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
 
     if (args.len == 0) {
         try stdout.print("Veth pair commands:\n", .{});
@@ -1295,7 +1325,10 @@ fn showVethDetails(allocator: std.mem.Allocator, name: []const u8, writer: anyty
 }
 
 fn handleState(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
 
     // Handle subcommands
     if (args.len > 0) {
@@ -1384,7 +1417,10 @@ fn handleState(allocator: std.mem.Allocator, args: []const []const u8) !void {
 }
 
 fn handleStateExport(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
 
     // Parse options
     var options = state_exporter.ExportOptions.default;
@@ -1434,7 +1470,10 @@ fn handleStateExport(allocator: std.mem.Allocator, args: []const []const u8) !vo
 }
 
 fn handleEvents(args: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
 
     // Parse duration argument (default 10 seconds)
     var duration_secs: i32 = 10;
@@ -1486,7 +1525,10 @@ fn handleEvents(args: []const []const u8) !void {
 }
 
 fn handleDaemon(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
     const pid_file = "/run/wire.pid";
     const socket_path = "/run/wire.sock";
 
@@ -1657,7 +1699,10 @@ fn reloadViaSignal(stdout: anytype, pid_file: []const u8) !void {
 }
 
 fn handleReconcile(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
 
     if (args.len == 0) {
         try stdout.print("Usage: wire reconcile <config-file> [--dry-run]\n", .{});
@@ -1757,7 +1802,10 @@ fn handleReconcile(allocator: std.mem.Allocator, args: []const []const u8) !void
 }
 
 fn handleDiff(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
 
     if (args.len == 0) {
         try stdout.print("Usage: wire diff <config-file>\n", .{});
@@ -1843,7 +1891,10 @@ fn showVlanDetails(allocator: std.mem.Allocator, name: []const u8, stdout: anyty
 }
 
 fn handleHistory(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
 
     // Default to showing recent changes
     var subcommand: []const u8 = "show";
@@ -1970,7 +2021,10 @@ fn handleHistory(allocator: std.mem.Allocator, args: []const []const u8) !void {
 }
 
 fn handleNeighbor(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
     const use_json = json_output.hasJsonFlag(args);
     const filtered_args = try json_output.filterJsonFlag(allocator, args);
     defer allocator.free(filtered_args);
@@ -1997,7 +2051,7 @@ fn handleNeighbor(allocator: std.mem.Allocator, args: []const []const u8) !void 
         defer allocator.free(interfaces);
 
         if (use_json) {
-            var json = json_output.JsonOutput.init(allocator);
+            var json = json_output.JsonOutput.init(allocator, stdout);
             try json.writeNeighbors(neighbors, interfaces);
             return;
         }
@@ -2210,7 +2264,10 @@ fn handleNeighbor(allocator: std.mem.Allocator, args: []const []const u8) !void 
 }
 
 fn handleRule(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
     const use_json = json_output.hasJsonFlag(args);
     const filtered_args = try json_output.filterJsonFlag(allocator, args);
     defer allocator.free(filtered_args);
@@ -2229,7 +2286,7 @@ fn handleRule(allocator: std.mem.Allocator, args: []const []const u8) !void {
         defer allocator.free(rules);
 
         if (use_json) {
-            var json = json_output.JsonOutput.init(allocator);
+            var json = json_output.JsonOutput.init(allocator, stdout);
             try json.writeRules(rules);
             return;
         }
@@ -2424,7 +2481,10 @@ fn handleRule(allocator: std.mem.Allocator, args: []const []const u8) !void {
 }
 
 fn handleNamespace(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
 
     var subcommand: []const u8 = "list";
     if (args.len > 0) {
@@ -2578,7 +2638,10 @@ fn handleNamespace(allocator: std.mem.Allocator, args: []const []const u8) !void
 }
 
 fn handleHardware(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
     const use_json = json_output.hasJsonFlag(args);
     const filtered_args = try json_output.filterJsonFlag(allocator, args);
     defer allocator.free(filtered_args);
@@ -2794,7 +2857,10 @@ fn handleHardware(allocator: std.mem.Allocator, args: []const []const u8) !void 
 }
 
 fn handleTunnel(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
 
     // Filter out --json flag (JSON output not yet implemented for tunnel commands)
     const filtered_args = try json_output.filterJsonFlag(allocator, args);
@@ -3216,7 +3282,10 @@ fn handleTunnel(allocator: std.mem.Allocator, args: []const []const u8) !void {
 }
 
 fn handleTc(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
     const use_json = json_output.hasJsonFlag(args);
     const filtered_args = try json_output.filterJsonFlag(allocator, args);
     defer allocator.free(filtered_args);
@@ -3298,7 +3367,7 @@ fn handleTc(allocator: std.mem.Allocator, args: []const []const u8) !void {
         defer allocator.free(qdiscs);
 
         if (use_json) {
-            var json = json_output.JsonOutput.init(allocator);
+            var json = json_output.JsonOutput.init(allocator, stdout);
             try json.writeQdiscs(qdiscs);
             return;
         }
@@ -3945,7 +4014,10 @@ fn parseClassId(s: []const u8) ?u32 {
 }
 
 fn handleTopology(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
 
     // Query live state
     var live_state = state_live.queryLiveState(allocator) catch |err| {
@@ -4037,7 +4109,10 @@ fn handleTopology(allocator: std.mem.Allocator, args: []const []const u8) !void 
 }
 
 fn handleDiagnose(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
 
     if (args.len == 0) {
         try stdout.print("Diagnose commands (all native, no external tools):\n", .{});
@@ -4080,7 +4155,10 @@ fn handleDiagnose(allocator: std.mem.Allocator, args: []const []const u8) !void 
 }
 
 fn handleDiagnosePing(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
 
     if (args.len == 0) {
         try stdout.print("Usage: wire diagnose ping <target> [options]\n", .{});
@@ -4129,7 +4207,10 @@ fn handleDiagnosePing(allocator: std.mem.Allocator, args: []const []const u8) !v
 }
 
 fn handleDiagnoseTrace(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
 
     if (args.len == 0) {
         try stdout.print("Usage: wire diagnose trace <target> [options]\n", .{});
@@ -4176,7 +4257,10 @@ fn handleDiagnoseTrace(allocator: std.mem.Allocator, args: []const []const u8) !
 }
 
 fn handleDiagnoseCapture(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
 
     var options = native_capture.CaptureOptions{};
     var filter_str: ?[]const u8 = null;
@@ -4245,7 +4329,10 @@ fn handleDiagnoseCapture(allocator: std.mem.Allocator, args: []const []const u8)
 }
 
 fn handlePathTrace(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
 
     if (args.len < 3) {
         try stdout.print("Usage: wire trace <interface> to <destination>\n", .{});
@@ -4284,7 +4371,10 @@ fn handlePathTrace(allocator: std.mem.Allocator, args: []const []const u8) !void
 }
 
 fn handleProbe(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
 
     if (args.len == 0) {
         try stdout.print("Probe commands:\n", .{});
@@ -4368,7 +4458,10 @@ fn handleProbe(allocator: std.mem.Allocator, args: []const []const u8) !void {
 }
 
 fn handleValidate(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
 
     if (args.len == 0) {
         try stdout.print("Validate commands:\n", .{});
@@ -4507,7 +4600,10 @@ fn handleValidate(allocator: std.mem.Allocator, args: []const []const u8) !void 
 }
 
 fn handleWatch(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
 
     if (args.len == 0) {
         try stdout.print("Watch commands:\n", .{});
@@ -4619,7 +4715,10 @@ fn handleWatch(allocator: std.mem.Allocator, args: []const []const u8) !void {
 }
 
 fn handleInterfaceStats(allocator: std.mem.Allocator, iface_name: []const u8) !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
 
     const iface_stats = stats.getInterfaceStatsByName(allocator, iface_name) catch |err| {
         try stdout.print("Failed to get statistics: {}\n", .{err});
@@ -4635,13 +4734,19 @@ fn handleInterfaceStats(allocator: std.mem.Allocator, iface_name: []const u8) !v
 }
 
 fn printVersion() !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
     try stdout.print("wire {s}\n", .{version});
     try stdout.print("Low-level, declarative, continuously-supervised network configuration for Linux\n", .{});
 }
 
 fn printUsage() !void {
-    const stdout = std.io.getStdOut().writer();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        const stdout = &stdout_w.interface;
+        defer stdout.flush() catch {};
     try stdout.print(
         \\wire - Network configuration tool for Linux
         \\

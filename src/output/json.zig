@@ -17,14 +17,14 @@ pub const OutputFormat = enum {
 
 /// JSON output helper
 pub const JsonOutput = struct {
-    writer: std.fs.File.Writer,
+    writer: *std.Io.Writer,
     allocator: std.mem.Allocator,
 
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator) Self {
+    pub fn init(allocator: std.mem.Allocator, writer: *std.Io.Writer) Self {
         return Self{
-            .writer = std.io.getStdOut().writer(),
+            .writer = writer,
             .allocator = allocator,
         };
     }
@@ -316,7 +316,7 @@ pub fn hasJsonFlag(args: []const []const u8) bool {
 
 /// Filter out --json flag from args
 pub fn filterJsonFlag(allocator: std.mem.Allocator, args: []const []const u8) ![]const []const u8 {
-    var filtered = std.ArrayList([]const u8).init(allocator);
+    var filtered = std.array_list.Managed([]const u8).init(allocator);
     errdefer filtered.deinit();
 
     for (args) |arg| {

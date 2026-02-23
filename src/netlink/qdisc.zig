@@ -172,7 +172,7 @@ pub fn getQdiscs(allocator: std.mem.Allocator, if_index: i32) ![]QdiscInfo {
     const response = try nl.request(msg, allocator);
     defer allocator.free(response);
 
-    var qdiscs = std.ArrayList(QdiscInfo).init(allocator);
+    var qdiscs = std.array_list.Managed(QdiscInfo).init(allocator);
     errdefer qdiscs.deinit();
 
     // Parse response
@@ -471,7 +471,7 @@ pub fn getClasses(allocator: std.mem.Allocator, if_index: i32) ![]ClassInfo {
     const response = try nl.request(msg, allocator);
     defer allocator.free(response);
 
-    var classes = std.ArrayList(ClassInfo).init(allocator);
+    var classes = std.array_list.Managed(ClassInfo).init(allocator);
     errdefer classes.deinit();
 
     // Parse response
@@ -755,7 +755,7 @@ pub fn getFilters(allocator: std.mem.Allocator, if_index: i32, parent: u32) ![]F
     const response = try nl.request(msg, allocator);
     defer allocator.free(response);
 
-    var filters = std.ArrayList(FilterInfo).init(allocator);
+    var filters = std.array_list.Managed(FilterInfo).init(allocator);
     errdefer filters.deinit();
 
     // Parse response

@@ -110,7 +110,7 @@ pub fn getRoutes(allocator: std.mem.Allocator) ![]Route {
     const response = try nl.request(msg, allocator);
     defer allocator.free(response);
 
-    var routes = std.ArrayList(Route).init(allocator);
+    var routes = std.array_list.Managed(Route).init(allocator);
     errdefer routes.deinit();
 
     var offset: usize = 0;

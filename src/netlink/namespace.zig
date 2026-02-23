@@ -23,7 +23,7 @@ pub const Namespace = struct {
 
 /// List all named network namespaces
 pub fn listNamespaces(allocator: std.mem.Allocator) ![]Namespace {
-    var namespaces = std.ArrayList(Namespace).init(allocator);
+    var namespaces = std.array_list.Managed(Namespace).init(allocator);
     errdefer namespaces.deinit();
 
     // Open /var/run/netns directory
@@ -265,7 +265,7 @@ fn findInPath(allocator: std.mem.Allocator, cmd: []const u8) ?[:0]const u8 {
         if (dir.len == 0) continue;
 
         // Build full path: dir/cmd
-        const full_path = std.fmt.allocPrintZ(allocator, "{s}/{s}", .{ dir, cmd }) catch continue;
+        const full_path = std.fmt.allocPrintSentinel(allocator, "{s}/{s}", .{ dir, cmd }, 0) catch continue;
 
         // Check if file exists and is executable
         const stat = std.posix.fstatat(std.posix.AT.FDCWD, full_path, 0) catch {

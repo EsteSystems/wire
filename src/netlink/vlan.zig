@@ -159,7 +159,7 @@ pub fn getVlans(allocator: std.mem.Allocator) ![]Vlan {
     const interfaces = try interface.getInterfaces(allocator);
     defer allocator.free(interfaces);
 
-    var vlans = std.ArrayList(Vlan).init(allocator);
+    var vlans = std.array_list.Managed(Vlan).init(allocator);
     errdefer vlans.deinit();
 
     for (interfaces) |iface| {

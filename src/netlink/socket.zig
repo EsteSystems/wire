@@ -440,7 +440,7 @@ pub const NetlinkSocket = struct {
         }
 
         // Receive all messages
-        var responses = std.ArrayList(u8).init(allocator);
+        var responses = std.array_list.Managed(u8).init(allocator);
         errdefer responses.deinit();
 
         var buf: [RECV_BUF_SIZE]u8 = undefined;

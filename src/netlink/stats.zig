@@ -233,7 +233,7 @@ pub fn getAllInterfaceStats(allocator: std.mem.Allocator) ![]InterfaceWithStats 
     defer allocator.free(response);
 
     // Parse responses
-    var interfaces = std.ArrayList(InterfaceWithStats).init(allocator);
+    var interfaces = std.array_list.Managed(InterfaceWithStats).init(allocator);
     errdefer interfaces.deinit();
 
     var offset: usize = 0;
