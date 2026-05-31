@@ -124,7 +124,6 @@ pub const Reconciler = struct {
     }
 
     fn applyChangeOnce(self: *Self, change: state_types.StateChange) ReconcileResult {
-        _ = self;
 
         switch (change) {
             .bond_add => |bond| {
@@ -243,8 +242,7 @@ pub const Reconciler = struct {
 
                 if (iface_name.len > 0) {
                     // Query interface by name
-                    const allocator = std.heap.page_allocator;
-                    const maybe_iface = netlink_interface.getInterfaceByName(allocator, iface_name) catch {
+                    const maybe_iface = netlink_interface.getInterfaceByName(self.allocator, iface_name) catch {
                         return ReconcileResult{
                             .success = false,
                             .error_message = "Failed to query interface",
