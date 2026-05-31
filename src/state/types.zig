@@ -141,10 +141,16 @@ pub const VlanState = struct {
     name_len: usize,
     index: i32,
     parent_index: i32,
+    parent_name: [16]u8,
+    parent_name_len: usize,
     vlan_id: u16,
 
     pub fn getName(self: *const VlanState) []const u8 {
         return self.name[0..self.name_len];
+    }
+
+    pub fn getParentName(self: *const VlanState) []const u8 {
+        return self.parent_name[0..self.parent_name_len];
     }
 };
 
@@ -281,6 +287,7 @@ pub const StateChange = union(enum) {
     route_remove: RouteState,
     bond_add: BondState,
     bond_remove: []const u8,
+    bond_modify: BondState,
     bridge_add: BridgeState,
     bridge_remove: []const u8,
     vlan_add: VlanState,

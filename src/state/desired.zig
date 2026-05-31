@@ -217,6 +217,8 @@ fn processVlanCommand(
                 .name_len = 0,
                 .index = generateVirtualIndex(state),
                 .parent_index = 0,
+                .parent_name = undefined,
+                .parent_name_len = 0,
                 .vlan_id = id,
             };
 

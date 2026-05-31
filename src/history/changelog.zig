@@ -374,6 +374,7 @@ pub fn stateChangeToEntry(change: state_types.StateChange) ChangeEntry {
         },
         .bond_add => |bond| ChangeEntry.create(.bond, bond.getName(), "create", "new bond"),
         .bond_remove => |name| ChangeEntry.create(.bond, name, "destroy", "deleted"),
+        .bond_modify => |bond| ChangeEntry.create(.bond, bond.getName(), "modify", "parameters changed"),
         .bridge_add => |bridge| ChangeEntry.create(.bridge, bridge.getName(), "create", "new bridge"),
         .bridge_remove => |name| ChangeEntry.create(.bridge, name, "destroy", "deleted"),
         .vlan_add => |vlan| blk: {

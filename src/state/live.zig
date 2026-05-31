@@ -67,11 +67,24 @@ fn queryInterfaces(state: *types.NetworkState) !void {
         if (iface.getLinkKind()) |kind| {
             if (std.mem.eql(u8, kind, "vlan")) {
                 if (iface.link_index) |parent_idx| {
+                    // Look up parent interface name from state
+                    var parent_name: [16]u8 = undefined;
+                    var parent_name_len: usize = 0;
+                    for (state.interfaces.items) |siface| {
+                        if (siface.index == parent_idx) {
+                            const pname = siface.getName();
+                            @memcpy(parent_name[0..pname.len], pname);
+                            parent_name_len = pname.len;
+                            break;
+                        }
+                    }
                     var vlan_state = types.VlanState{
                         .name = undefined,
                         .name_len = name.len,
                         .index = iface.index,
                         .parent_index = parent_idx,
+                        .parent_name = parent_name,
+                        .parent_name_len = parent_name_len,
                         .vlan_id = iface.vlan_id orelse 0,
                     };
                     @memcpy(vlan_state.name[0..name.len], name);

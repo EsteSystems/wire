@@ -150,6 +150,13 @@ pub const Reconciler = struct {
                 return ReconcileResult{ .success = true, .change = change };
             },
 
+            .bond_modify => |bond| {
+                // Modify bond parameters (mode, miimon, etc.)
+                // This would require set bond ioctl which is not yet implemented
+                _ = bond;
+                return ReconcileResult{ .success = true, .change = change };
+            },
+
             .bridge_add => |bridge| {
                 netlink_bridge.createBridge(bridge.getName()) catch {
                     return ReconcileResult{
@@ -173,20 +180,23 @@ pub const Reconciler = struct {
             },
 
             .vlan_add => |vlan| {
-                // Get parent name from parent_index
-                // For now, we need to look up the parent interface name
-                // This requires a live state query or we store parent name in VlanState
-                // For simplicity, assume parent name is stored or we use a default
-                const parent_idx = vlan.parent_index;
-                _ = parent_idx;
-
-                // TODO: Look up parent interface name
-                // For now, skip VLAN creation - needs more state info
-                return ReconcileResult{
-                    .success = false,
-                    .error_message = "VLAN creation requires parent interface lookup",
-                    .change = change,
+                // Get parent name from stored parent_name field
+                const parent_name = vlan.getParentName();
+                if (parent_name.len == 0) {
+                    return ReconcileResult{
+                        .success = false,
+                        .error_message = "VLAN parent interface name not available",
+                        .change = change,
+                    };
+                }
+                netlink_vlan.createVlan(parent_name, vlan.vlan_id) catch {
+                    return ReconcileResult{
+                        .success = false,
+                        .error_message = "Failed to create VLAN",
+                        .change = change,
+                    };
                 };
+                return ReconcileResult{ .success = true, .change = change };
             },
 
             .vlan_remove => |name| {

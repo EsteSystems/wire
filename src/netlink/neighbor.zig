@@ -350,12 +350,67 @@ fn parseIPv4(ip: []const u8) ?[4]u8 {
     return result;
 }
 
-/// Parse IPv6 address string to bytes (simplified - basic format only)
+/// Parse IPv6 address string to bytes (handles abbreviated form with ::)
 fn parseIPv6(ip: []const u8) ?[16]u8 {
-    // Very basic IPv6 parsing - handles full form only for now
-    _ = ip;
-    // TODO: Implement full IPv6 parsing
-    return null;
+    var result: [16]u8 = undefined;
+    @memset(&result, 0);
+
+    // Handle :: abbreviation
+    const double_colon = std.mem.indexOf(u8, ip, "::");
+    if (double_colon) |dc| {
+        // Parse left part
+        const left_part = ip[0..dc];
+        if (left_part.len > 0) {
+            var left_octet: usize = 0;
+            var left_parts = std.mem.splitScalar(u8, left_part, ':');
+            while (left_parts.next()) |group| {
+                if (group.len == 0) break;
+                if (left_octet >= 14) return null;
+                const val = std.fmt.parseInt(u16, group, 16) catch return null;
+                result[left_octet] = @intCast(val >> 8);
+                result[left_octet + 1] = @intCast(val & 0xFF);
+                left_octet += 2;
+            }
+        }
+
+        // Parse right part, starting from end
+        const right_part = ip[dc + 2 ..];
+        if (right_part.len > 0) {
+            var right_octet: usize = 16;
+            var right_parts = std.mem.splitScalar(u8, right_part, ':');
+            // Collect groups then place from right
+            var groups: [8]u16 = undefined;
+            var group_count: usize = 0;
+            while (right_parts.next()) |group| {
+                if (group.len == 0) break;
+                if (group_count >= 8) return null;
+                groups[group_count] = std.fmt.parseInt(u16, group, 16) catch return null;
+                group_count += 1;
+            }
+            var i: usize = 0;
+            while (i < group_count) : (i += 1) {
+                if (right_octet < 2) return null;
+                right_octet -= 2;
+                result[right_octet] = @intCast(groups[group_count - 1 - i] >> 8);
+                result[right_octet + 1] = @intCast(groups[group_count - 1 - i] & 0xFF);
+            }
+        }
+    } else {
+        // Full form without ::
+        var octet: usize = 0;
+        var parts = std.mem.splitScalar(u8, ip, ':');
+        while (parts.next()) |group| {
+            if (group.len == 0) return null;
+            if (octet >= 16) return null;
+            const val = std.fmt.parseInt(u16, group, 16) catch return null;
+            result[octet] = @intCast(val >> 8);
+            result[octet + 1] = @intCast(val & 0xFF);
+            octet += 2;
+        }
+        if (octet != 16) return null;
+    }
+
+    return result;
 }
 
 /// Add a static neighbor entry (ARP/NDP)

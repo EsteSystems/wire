@@ -49,7 +49,7 @@ pub const ProcessManager = struct {
         args: []const []const u8,
         timeout_ms: u32,
     ) !ProcessResult {
-        _ = timeout_ms; // TODO: implement proper timeout with threads
+        _ = timeout_ms; // Future: implement proper timeout with threads
 
         // Build full argument list (program name + args)
         var argv = std.array_list.Managed([]const u8).init(self.allocator);

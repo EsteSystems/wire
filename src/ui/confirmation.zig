@@ -83,10 +83,27 @@ pub const ConfirmationSystem = struct {
 
         try self.stdout.print("{s} [y/N]: ", .{prompt});
 
-        // FIXME: stdin reading needs proper Io reader in Zig 0.16.0
-        // For now, always require --yes flag for interactive mode
-        _ = &self;
-        return false;
+        // Read a line from stdin using Io reader (byte-by-byte via buffered reads)
+        var rbuf: [128]u8 = undefined;
+        var reader = self.stdin.reader(self.io, &rbuf);
+        var buf: [64]u8 = undefined;
+        var i: usize = 0;
+        while (i < buf.len - 1) {
+            const buffered = reader.interface.buffered();
+            if (buffered.len == 0) {
+                reader.interface.fill(1) catch return false;
+                continue;
+            }
+            const byte = buffered[0];
+            reader.interface.buffer = reader.interface.buffer[1..];
+            reader.interface.end -= 1;
+            if (byte == '\n') break;
+            buf[i] = byte;
+            i += 1;
+        }
+        const line = buf[0..i];
+        const trimmed = std.mem.trim(u8, line, " \t\r\n");
+        return std.mem.eql(u8, trimmed, "y") or std.mem.eql(u8, trimmed, "Y") or std.mem.eql(u8, trimmed, "yes") or std.mem.eql(u8, trimmed, "YES");
     }
 
     /// Prompt for confirmation with extra warning for dangerous changes
@@ -100,10 +117,26 @@ pub const ConfirmationSystem = struct {
         try self.stdout.print("{s}\n", .{message});
         try self.stdout.print("\nType 'yes' to confirm: ", .{});
 
-        // FIXME: stdin reading needs proper Io reader in Zig 0.16.0
-        // For now, always require --yes flag for interactive mode
-        _ = &self;
-        return false;
+        var rbuf: [128]u8 = undefined;
+        var reader = self.stdin.reader(self.io, &rbuf);
+        var buf: [64]u8 = undefined;
+        var i: usize = 0;
+        while (i < buf.len - 1) {
+            const buffered = reader.interface.buffered();
+            if (buffered.len == 0) {
+                reader.interface.fill(1) catch return false;
+                continue;
+            }
+            const byte = buffered[0];
+            reader.interface.buffer = reader.interface.buffer[1..];
+            reader.interface.end -= 1;
+            if (byte == '\n') break;
+            buf[i] = byte;
+            i += 1;
+        }
+        const line = buf[0..i];
+        const trimmed = std.mem.trim(u8, line, " \t\r\n");
+        return std.mem.eql(u8, trimmed, "yes") or std.mem.eql(u8, trimmed, "YES");
     }
 
     /// Check if any change in a diff is dangerous
@@ -231,6 +264,9 @@ pub const ConfirmationSystem = struct {
             .bond_remove => |name| {
                 try self.stdout.print("Delete bond: {s}", .{name});
             },
+            .bond_modify => |bond| {
+                try self.stdout.print("Modify bond: {s}", .{bond.getName()});
+            },
             .bridge_add => |bridge| {
                 try self.stdout.print("Create bridge: {s}", .{bridge.getName()});
             },
@@ -300,7 +336,7 @@ pub fn isDangerousChange(change: state_types.StateChange) bool {
             // Removing addresses is potentially dangerous
             return true;
         },
-        .bond_remove, .bridge_remove => {
+        .bond_remove, .bond_modify, .bridge_remove => {
             // Deleting virtual interfaces is dangerous
             return true;
         },
@@ -313,7 +349,7 @@ pub fn isDangerousChange(change: state_types.StateChange) bool {
 fn getChangeSymbol(change: state_types.StateChange) []const u8 {
     return switch (change) {
         .bond_add, .bridge_add, .vlan_add, .address_add, .route_add, .interface_add => "+",
-        .bond_remove, .bridge_remove, .vlan_remove, .address_remove, .route_remove, .interface_remove => "-",
+        .bond_remove, .bond_modify, .bridge_remove, .vlan_remove, .address_remove, .route_remove, .interface_remove => "-",
         .interface_modify => "~",
     };
 }

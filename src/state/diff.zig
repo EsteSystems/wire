@@ -35,7 +35,10 @@ fn compareBonds(desired: *const types.NetworkState, live: *const types.NetworkSt
         for (live.bonds.items) |l_bond| {
             if (std.mem.eql(u8, d_bond.getName(), l_bond.getName())) {
                 found = true;
-                // TODO: Compare bond parameters and generate modify change
+                // Compare bond parameters
+                if (d_bond.mode != l_bond.mode or d_bond.miimon != l_bond.miimon or d_bond.updelay != l_bond.updelay or d_bond.downdelay != l_bond.downdelay) {
+                    try diff.changes.append(.{ .bond_modify = d_bond });
+                }
                 break;
             }
         }
