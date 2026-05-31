@@ -508,14 +508,14 @@ pub const NetlinkSocket = struct {
 
 /// Message builder for netlink requests
 pub const MessageBuilder = struct {
-    buffer: []u8,
+    buffer: []align(@alignOf(NlMsgHdr)) u8,
     offset: usize,
     seq: u32,
     pid: u32,
 
     const Self = @This();
 
-    pub fn init(buffer: []u8, seq: u32, pid: u32) Self {
+    pub fn init(buffer: []align(@alignOf(NlMsgHdr)) u8, seq: u32, pid: u32) Self {
         return Self{
             .buffer = buffer,
             .offset = 0,
@@ -706,7 +706,7 @@ test "nlAlign" {
 }
 
 test "MessageBuilder basic" {
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(@alignOf(NlMsgHdr)) = undefined;
     var builder = MessageBuilder.init(&buf, 1, 1000);
 
     const hdr = try builder.addHeader(RTM.GETLINK, NLM_F.REQUEST | NLM_F.DUMP);
@@ -720,7 +720,7 @@ test "MessageBuilder basic" {
 
 test "AttrParser" {
     // Build a simple attribute buffer
-    var buf: [64]u8 = undefined;
+    var buf: [64]u8 align(@alignOf(NlAttr)) = undefined;
 
     // Attribute: type=3 (IFNAME), value="eth0\0"
     const attr: *NlAttr = @ptrCast(@alignCast(&buf));
