@@ -1,6 +1,5 @@
 const std = @import("std");
 const compat = @import("../compat.zig");
-const posix = std.posix;
 const linux = std.os.linux;
 
 /// Service entry from /etc/services
@@ -81,32 +80,18 @@ pub const ProbeResult = struct {
     }
 };
 
-/// Parse /etc/services and find a service by name
-pub fn lookupService(allocator: std.mem.Allocator, name: []const u8, protocol: ?Protocol) !?Service {
-    const file = compat.openFileAbsolute("/etc/services", .{}) catch |err| {
-        if (err == error.FileNotFound) return null;
-        return err;
-    };
-    defer file.close();
-
-    var reader_buf: [4096]u8 = undefined;
-    var reader = file.reader(compat.globalIo(), &reader_buf);
-    const reader_iface = &reader.interface;
-
-    var line_buf: [512]u8 = undefined;
-
-    while (reader_iface.readUntilDelimiterOrEof(&line_buf, '\n') catch null) |line| {
-        // Skip empty lines and comments
+/// Parse /etc/services content line by line
+fn parseServicesContent(content: []const u8, name: []const u8, protocol: ?Protocol, allocator: std.mem.Allocator) !?Service {
+    var lines = std.mem.splitScalar(u8, content, '\n');
+    while (lines.next()) |line| {
         const trimmed = std.mem.trim(u8, line, " \t");
         if (trimmed.len == 0 or trimmed[0] == '#') continue;
 
-        // Parse: service-name port/protocol [aliases...]
         var parts = std.mem.tokenizeAny(u8, trimmed, " \t");
 
         const service_name = parts.next() orelse continue;
         const port_proto = parts.next() orelse continue;
 
-        // Parse port/protocol
         var port_parts = std.mem.splitScalar(u8, port_proto, '/');
         const port_str = port_parts.next() orelse continue;
         const proto_str = port_parts.next() orelse continue;
@@ -119,17 +104,14 @@ pub fn lookupService(allocator: std.mem.Allocator, name: []const u8, protocol: ?
         else
             continue;
 
-        // Check if protocol matches (if specified)
         if (protocol) |p| {
             if (p != proto) continue;
         }
 
-        // Check name match
         if (std.mem.eql(u8, service_name, name)) {
-            // Collect aliases
             var aliases = std.array_list.Managed([]const u8).init(allocator);
             while (parts.next()) |alias| {
-                if (alias[0] == '#') break; // Comment starts
+                if (alias[0] == '#') break;
                 try aliases.append(try allocator.dupe(u8, alias));
             }
 
@@ -141,7 +123,6 @@ pub fn lookupService(allocator: std.mem.Allocator, name: []const u8, protocol: ?
             };
         }
 
-        // Check aliases
         while (parts.next()) |alias| {
             if (alias[0] == '#') break;
             if (std.mem.eql(u8, alias, name)) {
@@ -154,40 +135,59 @@ pub fn lookupService(allocator: std.mem.Allocator, name: []const u8, protocol: ?
             }
         }
     }
-
     return null;
+}
+
+/// Read /etc/services file content
+fn readServicesFile() ![]const u8 {
+    const io = compat.globalIo();
+    const file = compat.openFileAbsolute("/etc/services", .{}) catch |err| {
+        if (err == error.FileNotFound) return error.FileNotFound;
+        return err;
+    };
+    defer file.close(io);
+
+    var reader_buf: [4096]u8 = undefined;
+    var reader = file.reader(io, &reader_buf);
+    return reader.interface.readAlloc(std.heap.page_allocator, 65536) catch |err| {
+        if (err == error.FileNotFound) return error.FileNotFound;
+        return err;
+    };
+}
+
+/// Parse /etc/services and find a service by name
+pub fn lookupService(allocator: std.mem.Allocator, name: []const u8, protocol: ?Protocol) !?Service {
+    const content = readServicesFile() catch |err| {
+        if (err == error.FileNotFound) return null;
+        return err;
+    };
+    defer std.heap.page_allocator.free(content);
+    return parseServicesContent(content, name, protocol, allocator);
 }
 
 /// Resolve port from service name or numeric string
 pub fn resolvePort(allocator: std.mem.Allocator, port_or_service: []const u8, protocol: Protocol) !u16 {
-    // Try parsing as number first
     if (std.fmt.parseInt(u16, port_or_service, 10)) |port| {
         return port;
     } else |_| {
-        // Try looking up as service name
         if (try lookupServicePort(port_or_service, protocol)) |port| {
             return port;
         }
-        _ = allocator; // Unused but kept for API compatibility
+        _ = allocator;
         return error.UnknownService;
     }
 }
 
 /// Lookup just the port number (no allocations)
 pub fn lookupServicePort(name: []const u8, protocol: ?Protocol) !?u16 {
-    const file = compat.openFileAbsolute("/etc/services", .{}) catch |err| {
+    const content = readServicesFile() catch |err| {
         if (err == error.FileNotFound) return null;
         return err;
     };
-    defer file.close();
+    defer std.heap.page_allocator.free(content);
 
-    var reader_buf: [4096]u8 = undefined;
-    var reader = file.reader(compat.globalIo(), &reader_buf);
-    const reader_iface = &reader.interface;
-
-    var line_buf: [512]u8 = undefined;
-
-    while (reader_iface.readUntilDelimiterOrEof(&line_buf, '\n') catch null) |line| {
+    var lines = std.mem.splitScalar(u8, content, '\n');
+    while (lines.next()) |line| {
         const trimmed = std.mem.trim(u8, line, " \t");
         if (trimmed.len == 0 or trimmed[0] == '#') continue;
 
@@ -216,7 +216,6 @@ pub fn lookupServicePort(name: []const u8, protocol: ?Protocol) !?u16 {
             return port;
         }
 
-        // Check aliases
         while (parts.next()) |alias| {
             if (alias[0] == '#') break;
             if (std.mem.eql(u8, alias, name)) {
@@ -273,8 +272,9 @@ pub fn probeTcp(target: []const u8, port: u16, timeout_ms: u32) ProbeResult {
         };
     };
 
-    // Create socket
-    const sock = posix.socket(posix.AF.INET, posix.SOCK.STREAM | posix.SOCK.NONBLOCK, 0) catch {
+    // Create socket (linux.socket returns raw fd, negative on error)
+    const sock_raw = linux.socket(linux.AF.INET, linux.SOCK.STREAM | linux.SOCK.NONBLOCK, 0);
+    if (@as(isize, @bitCast(sock_raw)) < 0) {
         return ProbeResult{
             .target = target,
             .port = port,
@@ -283,20 +283,21 @@ pub fn probeTcp(target: []const u8, port: u16, timeout_ms: u32) ProbeResult {
             .latency_us = null,
             .error_msg = "Failed to create socket",
         };
-    };
-    defer posix.close(sock);
+    }
+    const sock: linux.fd_t = @intCast(sock_raw);
+    defer _ = linux.close(sock);
 
     // Build address
-    var addr = posix.sockaddr.in{
-        .family = posix.AF.INET,
+    var addr = linux.sockaddr.in{
+        .family = linux.AF.INET,
         .port = std.mem.nativeToBig(u16, port),
         .addr = std.mem.bytesToValue(u32, &ip_bytes),
     };
 
     // Attempt non-blocking connect
-    const connect_result = posix.connect(sock, @ptrCast(&addr), @sizeOf(posix.sockaddr.in));
+    const connect_rc = linux.connect(sock, @ptrCast(&addr), @sizeOf(linux.sockaddr.in));
 
-    if (connect_result) |_| {
+    if (connect_rc == 0) {
         // Immediate success (rare, but possible on localhost)
         const end_time = compat.microTimestamp();
         return ProbeResult{
@@ -307,36 +308,40 @@ pub fn probeTcp(target: []const u8, port: u16, timeout_ms: u32) ProbeResult {
             .latency_us = @intCast(end_time - start_time),
             .error_msg = null,
         };
-    } else |err| {
-        if (err != error.WouldBlock) {
-            // Immediate error
-            const status: ProbeResult.Status = switch (err) {
-                error.ConnectionRefused => .closed,
-                error.NetworkUnreachable => .host_unreachable,
-                else => .error_occurred,
-            };
-            return ProbeResult{
-                .target = target,
-                .port = port,
-                .protocol = .tcp,
-                .status = status,
-                .latency_us = null,
-                .error_msg = null,
-            };
-        }
+    }
+
+    // Check if error is EINPROGRESS (non-blocking connect in progress)
+    const connect_errno = @as(isize, @bitCast(connect_rc));
+    if (connect_errno != -@as(isize, @intFromEnum(linux.E.INPROGRESS))) {
+        const status: ProbeResult.Status = switch (-connect_errno) {
+            @intFromEnum(linux.E.CONNREFUSED) => .closed,
+            @intFromEnum(linux.E.NETUNREACH) => .host_unreachable,
+            else => .error_occurred,
+        };
+        return ProbeResult{
+            .target = target,
+            .port = port,
+            .protocol = .tcp,
+            .status = status,
+            .latency_us = null,
+            .error_msg = null,
+        };
     }
 
     // Wait for connection with poll
-    var fds = [_]posix.pollfd{
+    var fds = [_]linux.pollfd{
         .{
             .fd = sock,
-            .events = posix.POLL.OUT,
+            .events = linux.POLL.OUT,
             .revents = 0,
         },
     };
 
-    const timeout_spec: i32 = @intCast(timeout_ms);
-    const poll_result = posix.poll(&fds, timeout_spec) catch {
+    const poll_rc = linux.poll(&fds, 1, @intCast(timeout_ms));
+    const end_time = compat.microTimestamp();
+    const latency: u64 = @intCast(end_time - start_time);
+
+    if (@as(isize, @bitCast(poll_rc)) < 0) {
         return ProbeResult{
             .target = target,
             .port = port,
@@ -345,12 +350,9 @@ pub fn probeTcp(target: []const u8, port: u16, timeout_ms: u32) ProbeResult {
             .latency_us = null,
             .error_msg = "Poll failed",
         };
-    };
+    }
 
-    const end_time = compat.microTimestamp();
-    const latency: u64 = @intCast(end_time - start_time);
-
-    if (poll_result == 0) {
+    if (poll_rc == 0) {
         // Timeout
         return ProbeResult{
             .target = target,
@@ -363,7 +365,7 @@ pub fn probeTcp(target: []const u8, port: u16, timeout_ms: u32) ProbeResult {
     }
 
     // Check if connection succeeded or failed
-    if (fds[0].revents & posix.POLL.OUT != 0) {
+    if (fds[0].revents & linux.POLL.OUT != 0) {
         // Check for socket error using raw syscall
         var so_error: c_int = 0;
         var optlen: linux.socklen_t = @sizeOf(c_int);
@@ -390,7 +392,6 @@ pub fn probeTcp(target: []const u8, port: u16, timeout_ms: u32) ProbeResult {
                 .error_msg = null,
             };
         } else {
-            // Connection failed
             const status: ProbeResult.Status = switch (so_error) {
                 111 => .closed, // ECONNREFUSED
                 101, 113 => .host_unreachable, // ENETUNREACH, EHOSTUNREACH
@@ -408,7 +409,7 @@ pub fn probeTcp(target: []const u8, port: u16, timeout_ms: u32) ProbeResult {
     }
 
     // Error event
-    if (fds[0].revents & posix.POLL.ERR != 0 or fds[0].revents & posix.POLL.HUP != 0) {
+    if (fds[0].revents & linux.POLL.ERR != 0 or fds[0].revents & linux.POLL.HUP != 0) {
         return ProbeResult{
             .target = target,
             .port = port,

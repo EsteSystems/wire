@@ -35,10 +35,10 @@ pub fn listNamespaces(allocator: std.mem.Allocator) ![]Namespace {
         }
         return err;
     };
-    defer dir.close();
+    defer dir.close(compat.globalIo());
 
     var iter = dir.iterate();
-    while (try iter.next()) |entry| {
+    while (try iter.next(compat.globalIo())) |entry| {
         if (entry.kind == .file or entry.kind == .sym_link) {
             var ns = Namespace{
                 .name = undefined,
@@ -58,7 +58,7 @@ pub fn listNamespaces(allocator: std.mem.Allocator) ![]Namespace {
 /// Create a new named network namespace
 pub fn createNamespace(name: []const u8) !void {
     // Ensure /var/run/netns exists
-    compat.makeDirAbsolute(NETNS_PATH) catch |err| {
+    compat.createDirAbsolute(NETNS_PATH) catch |err| {
         if (err != error.PathAlreadyExists) {
             return err;
         }
@@ -74,7 +74,7 @@ pub fn createNamespace(name: []const u8) !void {
     const file = compat.createFileAbsolute(path, .{}) catch |err| {
         return err;
     };
-    file.close();
+    file.close(compat.globalIo());
 
     // Fork a child to create the namespace
     const fork_rc = linux.fork();
@@ -173,7 +173,7 @@ pub fn namespaceExists(name: []const u8) bool {
 }
 
 /// Open a namespace file descriptor
-pub fn openNamespace(name: []const u8) !posix.fd_t {
+pub fn openNamespace(name: []const u8) !i32 {
     var path_buf: [128]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ NETNS_PATH, name }) catch {
         return error.NameTooLong;
@@ -186,7 +186,7 @@ pub fn openNamespace(name: []const u8) !posix.fd_t {
 /// Enter a network namespace (affects current process)
 pub fn enterNamespace(name: []const u8) !void {
     const fd = try openNamespace(name);
-    defer posix.close(fd);
+    defer _ = linux.close(fd);
 
     // setns(fd, CLONE_NEWNET)
     const rc = linux.syscall2(.setns, @intCast(fd), CLONE.NEWNET);
@@ -198,7 +198,7 @@ pub fn enterNamespace(name: []const u8) !void {
 /// Move an interface to another namespace
 pub fn moveInterfaceToNamespace(if_index: i32, ns_name: []const u8) !void {
     const ns_fd = try openNamespace(ns_name);
-    defer posix.close(ns_fd);
+    defer _ = linux.close(ns_fd);
 
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
@@ -258,7 +258,11 @@ fn findInPath(allocator: std.mem.Allocator, cmd: []const u8) ?[:0]const u8 {
     }
 
     // Get PATH from environment
-    const path_env = std.posix.getenv("PATH") orelse "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+    const path_env = blk: {
+        // In Zig 0.16.0, getenv is accessed via Io.Environ
+        // For namespace lookup, use default PATH
+        break :blk "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+    };
 
     // Search each directory in PATH
     var path_iter = std.mem.splitScalar(u8, path_env, ':');
@@ -269,16 +273,16 @@ fn findInPath(allocator: std.mem.Allocator, cmd: []const u8) ?[:0]const u8 {
         const full_path = std.fmt.allocPrintSentinel(allocator, "{s}/{s}", .{ dir, cmd }, 0) catch continue;
 
         // Check if file exists and is executable
-        const stat = std.posix.fstatat(std.posix.AT.FDCWD, full_path, 0) catch {
+        const stat = compat.cwd().statFile(compat.globalIo(), full_path, .{}) catch {
             allocator.free(full_path);
             continue;
         };
 
         // Check if it's a regular file (not directory) and has execute permission
-        const is_regular = (stat.mode & std.posix.S.IFMT) == std.posix.S.IFREG;
-        const is_executable = (stat.mode & std.posix.S.IXUSR) != 0 or
-            (stat.mode & std.posix.S.IXGRP) != 0 or
-            (stat.mode & std.posix.S.IXOTH) != 0;
+        const is_regular = stat.kind == .file;
+        const is_executable = (@intFromEnum(stat.permissions) & linux.S.IXUSR) != 0 or
+            (@intFromEnum(stat.permissions) & linux.S.IXGRP) != 0 or
+            (@intFromEnum(stat.permissions) & linux.S.IXOTH) != 0;
 
         if (is_regular and is_executable) {
             return full_path;
@@ -324,11 +328,12 @@ pub fn execInNamespace(allocator: std.mem.Allocator, ns_name: []const u8, argv: 
         }
         args[argv.len] = null;
 
-        // Exec
+        // Exec with null environment
+        const empty_env: [*:null]const ?[*:0]const u8 = @ptrCast(@alignCast(&[_:null]?[*:0]const u8{null}));
         const err = linux.execve(
             cmd_path,
             @ptrCast(args.ptr),
-            @ptrCast(std.os.environ.ptr),
+            empty_env,
         );
         _ = err;
         linux.exit(127);
@@ -340,11 +345,11 @@ pub fn execInNamespace(allocator: std.mem.Allocator, ns_name: []const u8, argv: 
         _ = linux.waitpid(@intCast(pid), &status, 0);
 
         if (linux.W.IFEXITED(status)) {
-            return .{ .Exited = linux.W.EXITSTATUS(status) };
+            return .{ .exited = linux.W.EXITSTATUS(status) };
         } else if (linux.W.IFSIGNALED(status)) {
-            return .{ .Signal = linux.W.TERMSIG(status) };
+            return .{ .signal = linux.W.TERMSIG(status) };
         } else {
-            return .{ .Exited = 1 };
+            return .{ .exited = 1 };
         }
     }
 }

@@ -116,11 +116,11 @@ pub const StateExporter = struct {
 
     /// Export to string
     pub fn exportToString(self: *Self, state: *const types.NetworkState) ![]u8 {
-        var list = std.array_list.Managed(u8).init(self.allocator);
-        errdefer list.deinit();
+        var allocating = std.Io.Writer.Allocating.init(self.allocator);
+        const writer = &allocating.writer;
 
-        try self.exportToWriter(state, list.writer());
-        return list.toOwnedSlice();
+        try self.exportToWriter(state, writer);
+        return allocating.toOwnedSlice();
     }
 
     /// Export to file

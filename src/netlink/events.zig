@@ -175,7 +175,7 @@ pub const EventMonitor = struct {
             const recv_result = linux.recvfrom(self.fd, &buf, buf.len, linux.MSG.DONTWAIT, null, null);
 
             if (@as(isize, @bitCast(recv_result)) < 0) {
-                const errno = linux.E.init(recv_result);
+                const errno = linux.errno(recv_result);
                 if (errno == .AGAIN) {
                     break; // No more messages (EAGAIN = EWOULDBLOCK on Linux)
                 }
@@ -418,33 +418,36 @@ fn parseNeighEvent(data: []const u8, is_new: bool, timestamp: i64) ?NetworkEvent
 
 /// Format an event for display
 pub fn formatEvent(event: *const NetworkEvent, buf: []u8) ![]const u8 {
-    var stream = std.io.fixedBufferStream(buf);
-    const writer = stream.writer();
+    var offset: usize = 0;
 
     switch (event.event_type) {
         .interface_added, .interface_removed => {
             const action = if (event.event_type == .interface_added) "added" else "removed";
             if (event.getInterfaceName()) |name| {
-                try writer.print("Interface {s} {s}", .{ name, action });
+                const written = try std.fmt.bufPrint(buf[offset..], "Interface {s} {s}", .{ name, action });
+                offset += written.len;
             } else if (event.interface_index) |idx| {
-                try writer.print("Interface (index={d}) {s}", .{ idx, action });
+                const written = try std.fmt.bufPrint(buf[offset..], "Interface (index={d}) {s}", .{ idx, action });
+                offset += written.len;
             }
         },
         .interface_up => {
             if (event.getInterfaceName()) |name| {
-                try writer.print("Interface {s} UP", .{name});
+                const written = try std.fmt.bufPrint(buf[offset..], "Interface {s} UP", .{name});
+                offset += written.len;
             }
         },
         .interface_down => {
             if (event.getInterfaceName()) |name| {
-                try writer.print("Interface {s} DOWN", .{name});
+                const written = try std.fmt.bufPrint(buf[offset..], "Interface {s} DOWN", .{name});
+                offset += written.len;
             }
         },
         .address_added, .address_removed => {
             const action = if (event.event_type == .address_added) "added" else "removed";
             if (event.address) |addr| {
                 if (event.address_family == 2) { // AF_INET
-                    try writer.print("Address {d}.{d}.{d}.{d}/{d} {s}", .{
+                    const written = try std.fmt.bufPrint(buf[offset..], "Address {d}.{d}.{d}.{d}/{d} {s}", .{
                         addr[0],
                         addr[1],
                         addr[2],
@@ -452,8 +455,10 @@ pub fn formatEvent(event: *const NetworkEvent, buf: []u8) ![]const u8 {
                         event.prefix_len orelse 0,
                         action,
                     });
+                    offset += written.len;
                 } else {
-                    try writer.print("Address (IPv6) {s}", .{action});
+                    const written = try std.fmt.bufPrint(buf[offset..], "Address (IPv6) {s}", .{action});
+                    offset += written.len;
                 }
             }
         },
@@ -461,9 +466,10 @@ pub fn formatEvent(event: *const NetworkEvent, buf: []u8) ![]const u8 {
             const action = if (event.event_type == .route_added) "added" else "removed";
             if (event.route_dst_len) |dst_len| {
                 if (dst_len == 0) {
-                    try writer.print("Route default {s}", .{action});
+                    const written = try std.fmt.bufPrint(buf[offset..], "Route default {s}", .{action});
+                    offset += written.len;
                 } else if (event.route_dst) |dst| {
-                    try writer.print("Route {d}.{d}.{d}.{d}/{d} {s}", .{
+                    const written = try std.fmt.bufPrint(buf[offset..], "Route {d}.{d}.{d}.{d}/{d} {s}", .{
                         dst[0],
                         dst[1],
                         dst[2],
@@ -471,15 +477,17 @@ pub fn formatEvent(event: *const NetworkEvent, buf: []u8) ![]const u8 {
                         dst_len,
                         action,
                     });
+                    offset += written.len;
                 }
             }
         },
         else => {
-            try writer.print("Event: {s}", .{@tagName(event.event_type)});
+            const written = try std.fmt.bufPrint(buf[offset..], "Event: {s}", .{@tagName(event.event_type)});
+            offset += written.len;
         },
     }
 
-    return stream.getWritten();
+    return buf[0..offset];
 }
 
 // Tests

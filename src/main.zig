@@ -1339,7 +1339,7 @@ fn handleState(allocator: std.mem.Allocator, io: std.Io, args: []const []const u
     if (args.len > 0) {
         const subcmd = args[0];
         if (std.mem.eql(u8, subcmd, "export")) {
-            try handleStateExport(allocator, args[1..]);
+            try handleStateExport(allocator, io, args[1..]);
             return;
         } else if (std.mem.eql(u8, subcmd, "help") or std.mem.eql(u8, subcmd, "--help")) {
             try stdout.print("State commands:\n", .{});
@@ -1679,7 +1679,7 @@ fn handleDaemon(allocator: std.mem.Allocator, io: std.Io, args: []const []const 
 
 fn stopViaSignal(stdout: anytype, pid_file: []const u8) !void {
     try stdout.print("Stopping wire daemon...\n", .{});
-    supervisor.sendSignal(pid_file, linux.SIG.TERM) catch |err| {
+    supervisor.sendSignal(pid_file, @intFromEnum(linux.SIG.TERM)) catch |err| {
         try stdout.print("Failed to stop daemon: {}\n", .{err});
         return;
     };
@@ -1696,7 +1696,7 @@ fn statusViaPid(stdout: anytype, pid_file: []const u8) !void {
 
 fn reloadViaSignal(stdout: anytype, pid_file: []const u8) !void {
     try stdout.print("Reloading wire daemon configuration...\n", .{});
-    supervisor.sendSignal(pid_file, linux.SIG.HUP) catch |err| {
+    supervisor.sendSignal(pid_file, @intFromEnum(linux.SIG.HUP)) catch |err| {
         try stdout.print("Failed to reload daemon: {}\n", .{err});
         return;
     };
@@ -2578,12 +2578,12 @@ fn handleNamespace(allocator: std.mem.Allocator, io: std.Io, args: []const []con
         };
 
         switch (result) {
-            .Exited => |code| {
+            .exited => |code| {
                 if (code != 0) {
                     try stdout.print("Command exited with code: {d}\n", .{code});
                 }
             },
-            .Signal => |sig| {
+            .signal => |sig| {
                 try stdout.print("Command killed by signal: {d}\n", .{sig});
             },
             else => {},
@@ -4448,7 +4448,7 @@ fn handleProbe(allocator: std.mem.Allocator, io: std.Io, args: []const []const u
 
     // Resolve port from service name or number
     const port = probe.resolvePort(allocator, port_or_cmd, .tcp) catch |err| {
-        if (err == error.UnknownService) {
+        if (err == error.unknownService) {
             try stdout.print("Unknown service: {s}\n", .{port_or_cmd});
             try stdout.print("Use a port number or a service name from /etc/services\n", .{});
         } else {
@@ -4665,7 +4665,7 @@ fn handleWatch(allocator: std.mem.Allocator, io: std.Io, args: []const []const u
 
     // Resolve port
     const port = probe.resolvePort(allocator, port_or_service, .tcp) catch |err| {
-        if (err == error.UnknownService) {
+        if (err == error.unknownService) {
             try stdout.print("Unknown service: {s}\n", .{port_or_service});
         } else {
             try stdout.print("Failed to resolve port: {}\n", .{err});

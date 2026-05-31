@@ -273,7 +273,7 @@ fn parseRttStats(line: []const u8, result: *PingResult) void {
         }
         if (parts.next()) |mdev_str| {
             // mdev may have " ms" suffix
-            const mdev_clean = std.mem.trimRight(u8, std.mem.trim(u8, mdev_str, " "), " ms");
+            const mdev_clean = std.mem.trim(u8, std.mem.trim(u8, mdev_str, " "), " ms");
             result.rtt_mdev = std.fmt.parseFloat(f64, mdev_clean) catch null;
         }
     }

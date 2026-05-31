@@ -128,7 +128,7 @@ pub const IpcServer = struct {
         const accept_result = linux.accept4(fd, @ptrCast(&client_addr), &addr_len, linux.SOCK.CLOEXEC);
 
         if (@as(isize, @bitCast(accept_result)) < 0) {
-            const errno = linux.E.init(accept_result);
+            const errno = linux.errno(accept_result);
             if (errno == .AGAIN) {
                 return false; // No pending connections
             }
@@ -213,20 +213,22 @@ pub const IpcServer = struct {
 
         // Format response
         var buf: [4096]u8 = undefined;
-        var stream = std.io.fixedBufferStream(&buf);
-        const writer = stream.writer();
+        var offset: usize = 0;
 
         if (diff.isEmpty()) {
-            writer.print("No drift detected - state is synchronized\n", .{}) catch {};
+            const written = std.fmt.bufPrint(buf[offset..], "No drift detected - state is synchronized\n", .{}) catch unreachable;
+            offset += written.len;
         } else {
-            writer.print("Drift detected: {d} changes needed\n", .{diff.changes.items.len}) catch {};
+            const written = std.fmt.bufPrint(buf[offset..], "Drift detected: {d} changes needed\n", .{diff.changes.items.len}) catch unreachable;
+            offset += written.len;
             for (diff.changes.items) |change| {
                 const change_name = @tagName(change);
-                writer.print("  - {s}\n", .{change_name}) catch {};
+                const written2 = std.fmt.bufPrint(buf[offset..], "  - {s}\n", .{change_name}) catch unreachable;
+                offset += written2.len;
             }
         }
 
-        try sendMessage(client_fd, .diff_response, stream.getWritten());
+        try sendMessage(client_fd, .diff_response, buf[0..offset]);
     }
 
     fn handleReloadRequest(self: *Self, client_fd: i32, sup: *supervisor.Supervisor) !void {
@@ -251,19 +253,27 @@ pub const IpcServer = struct {
 
         // Format state response
         var buf: [8192]u8 = undefined;
-        var stream = std.io.fixedBufferStream(&buf);
-        const writer = stream.writer();
-
-        writer.print("Interfaces: {d}\n", .{live.interfaces.items.len}) catch {};
+        var offset: usize = 0;
+        {
+            const written = std.fmt.bufPrint(buf[offset..], "Interfaces: {d}\n", .{live.interfaces.items.len}) catch unreachable;
+            offset += written.len;
+        }
         for (live.interfaces.items) |iface| {
             const state_str = if (iface.isUp()) "UP" else "DOWN";
-            writer.print("  {s}: {s} mtu {d}\n", .{ iface.getName(), state_str, iface.mtu }) catch {};
+            const written = std.fmt.bufPrint(buf[offset..], "  {s}: {s} mtu {d}\n", .{ iface.getName(), state_str, iface.mtu }) catch unreachable;
+            offset += written.len;
         }
 
-        writer.print("Addresses: {d}\n", .{live.addresses.items.len}) catch {};
-        writer.print("Routes: {d}\n", .{live.routes.items.len}) catch {};
+        {
+            const written = std.fmt.bufPrint(buf[offset..], "Addresses: {d}\n", .{live.addresses.items.len}) catch unreachable;
+            offset += written.len;
+        }
+        {
+            const written = std.fmt.bufPrint(buf[offset..], "Routes: {d}\n", .{live.routes.items.len}) catch unreachable;
+            offset += written.len;
+        }
 
-        try sendMessage(client_fd, .state_response, stream.getWritten());
+        try sendMessage(client_fd, .state_response, buf[0..offset]);
     }
 
     fn sendError(self: *Self, client_fd: i32, message: []const u8) !void {

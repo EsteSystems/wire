@@ -169,7 +169,7 @@ pub const ChangeEntry = struct {
 
         // Details (may contain |, so take rest)
         if (iter.next()) |details| {
-            const details_trimmed = std.mem.trimRight(u8, details, "\n\r");
+            const details_trimmed = std.mem.trim(u8, details, "\n\r");
             const details_len = @min(details_trimmed.len, entry.details.len);
             @memcpy(entry.details[0..details_len], details_trimmed[0..details_len]);
             entry.details_len = details_len;
@@ -202,14 +202,14 @@ pub const ChangeLogger = struct {
         // Open root as base for makePath
         var root = compat.openDirAbsolute("/", .{}) catch {
             // Fallback: try makeDirAbsolute
-            compat.makeDirAbsolute(parent) catch |err| {
+            compat.createDirAbsolute(parent) catch |err| {
                 if (err != error.PathAlreadyExists) {
                     return err;
                 }
             };
             return;
         };
-        defer root.close();
+        defer root.close(compat.globalIo());
 
         // Remove leading / for relative path
         const rel_path = if (parent.len > 0 and parent[0] == '/')
@@ -217,7 +217,7 @@ pub const ChangeLogger = struct {
         else
             parent;
 
-        root.makePath(rel_path) catch |err| {
+        root.createDirPath(compat.globalIo(), rel_path) catch |err| {
             if (err != error.PathAlreadyExists) {
                 return err;
             }
@@ -234,23 +234,24 @@ pub const ChangeLogger = struct {
             if (err == error.PathAlreadyExists) {
                 // File exists, open for append
                 const f = try compat.openFileAbsolute(self.log_path, .{ .mode = .write_only });
-                try f.seekFromEnd(0);
-                var buf: [512]u8 = undefined;
-                const line = try entry.serialize(&buf);
-                try f.writeAll(line);
-                f.close();
+                var wbuf: [512]u8 = undefined;
+                var writer = f.writer(compat.globalIo(), &wbuf);
+                var line_buf: [512]u8 = undefined;
+                const line = try entry.serialize(&line_buf);
+                try writer.interface.writeAll(line);
+                f.close(compat.globalIo());
                 return;
             }
             return err;
         };
-        defer file.close();
+        defer file.close(compat.globalIo());
 
-        // Seek to end
-        try file.seekFromEnd(0);
-
-        var buf: [512]u8 = undefined;
-        const line = try entry.serialize(&buf);
-        try file.writeAll(line);
+        // Write entry
+        var wbuf: [512]u8 = undefined;
+        var writer = file.writer(compat.globalIo(), &wbuf);
+        var line_buf: [512]u8 = undefined;
+        const line = try entry.serialize(&line_buf);
+        try writer.interface.writeAll(line);
     }
 
     /// Log a state change from StateDiff
@@ -285,31 +286,20 @@ pub const ChangeLogger = struct {
         const file = compat.openFileAbsolute(self.log_path, .{}) catch {
             return entries.toOwnedSlice();
         };
-        defer file.close();
+        defer file.close(compat.globalIo());
 
-        var buf: [4096]u8 = undefined;
-        var remaining: []u8 = &[_]u8{};
+        var rbuf: [4096]u8 = undefined;
+        var reader = file.reader(compat.globalIo(), &rbuf);
+        const content = reader.interface.readAlloc(self.allocator, 1024 * 1024) catch {
+            return entries.toOwnedSlice();
+        };
+        defer self.allocator.free(content);
 
-        while (true) {
-            const bytes_read = file.read(buf[remaining.len..]) catch break;
-            if (bytes_read == 0) break;
-
-            const total = remaining.len + bytes_read;
-            var data = buf[0..total];
-
-            while (std.mem.indexOf(u8, data, "\n")) |newline_pos| {
-                const line = data[0..newline_pos];
-                if (line.len > 0) {
-                    const entry = ChangeEntry.parse(line) catch continue;
-                    try entries.append(entry);
-                }
-                data = data[newline_pos + 1 ..];
-            }
-
-            // Keep remaining partial line
-            remaining = data;
-            if (remaining.len > 0 and remaining.ptr != buf[0..].ptr) {
-                std.mem.copyForwards(u8, &buf, remaining);
+        var lines = std.mem.splitScalar(u8, content, '\n');
+        while (lines.next()) |line| {
+            if (line.len > 0) {
+                const entry = ChangeEntry.parse(line) catch continue;
+                try entries.append(entry);
             }
         }
 
@@ -450,7 +440,7 @@ test "ChangeEntry serialize and parse" {
     var buf: [512]u8 = undefined;
     const line = try entry.serialize(&buf);
 
-    const parsed = try ChangeEntry.parse(std.mem.trimRight(u8, line, "\n"));
+    const parsed = try ChangeEntry.parse(std.mem.trim(u8, line, "\n"));
 
     try std.testing.expectEqual(entry.change_type, parsed.change_type);
     try std.testing.expectEqualStrings(entry.getTarget(), parsed.getTarget());

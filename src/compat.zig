@@ -27,9 +27,9 @@ pub fn deleteFileAbsolute(absolute_path: []const u8) std.Io.Dir.DeleteFileError!
     return std.Io.Dir.deleteFileAbsolute(globalIo(), absolute_path);
 }
 
-/// makeDirAbsolute wrapper using global Io.
-pub fn makeDirAbsolute(absolute_path: []const u8) std.Io.Dir.MakeDirError!void {
-    return std.Io.Dir.makeDirAbsolute(globalIo(), absolute_path);
+/// createDirAbsolute wrapper using global Io.
+pub fn createDirAbsolute(absolute_path: []const u8) !void {
+    return std.Io.Dir.createDirAbsolute(globalIo(), absolute_path, @enumFromInt(0o755));
 }
 
 /// accessAbsolute wrapper using global Io.

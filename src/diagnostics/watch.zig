@@ -1,4 +1,5 @@
 const std = @import("std");
+const linux = std.os.linux;
 const compat = @import("../compat.zig");
 const probe = @import("probe.zig");
 const validate = @import("validate.zig");
@@ -216,7 +217,11 @@ pub fn watch(config: WatchConfig, writer: anytype) !WatchStats {
 
         // Sleep for interval (unless this is the last iteration)
         if (config.max_iterations == null or iteration < config.max_iterations.?) {
-            std.Thread.sleep(@as(u64, config.interval_ms) * std.time.ns_per_ms);
+                var ts: linux.timespec = .{
+        .sec = @intCast((@as(u64, config.interval_ms) * std.time.ns_per_ms) / std.time.ns_per_s),
+        .nsec = @intCast((@as(u64, config.interval_ms) * std.time.ns_per_ms) % std.time.ns_per_s),
+    };
+    _ = linux.nanosleep(&ts, null);
         }
     }
 
@@ -273,7 +278,11 @@ pub fn watchInterface(allocator: std.mem.Allocator, iface_name: []const u8, inte
             try writer.print("ALERT: Interface {s} not found!\n", .{iface_name});
         }
 
-        std.Thread.sleep(@as(u64, interval_ms) * std.time.ns_per_ms);
+            var ts: linux.timespec = .{
+        .sec = @intCast((@as(u64, interval_ms) * std.time.ns_per_ms) / std.time.ns_per_s),
+        .nsec = @intCast((@as(u64, interval_ms) * std.time.ns_per_ms) % std.time.ns_per_s),
+    };
+    _ = linux.nanosleep(&ts, null);
     }
 }
 

@@ -60,14 +60,14 @@ pub const SnapshotManager = struct {
         // Open root as base for makePath
         var root = compat.openDirAbsolute("/", .{}) catch {
             // Fallback: try makeDirAbsolute
-            compat.makeDirAbsolute(self.snapshot_dir) catch |err| {
+            compat.createDirAbsolute(self.snapshot_dir) catch |err| {
                 if (err != error.PathAlreadyExists) {
                     return err;
                 }
             };
             return;
         };
-        defer root.close();
+        defer root.close(compat.globalIo());
 
         // Remove leading / for relative path
         const rel_path = if (self.snapshot_dir.len > 0 and self.snapshot_dir[0] == '/')
@@ -75,7 +75,7 @@ pub const SnapshotManager = struct {
         else
             self.snapshot_dir;
 
-        root.makePath(rel_path) catch |err| {
+        root.createDirPath(compat.globalIo(), rel_path) catch |err| {
             if (err != error.PathAlreadyExists) {
                 return err;
             }
@@ -108,8 +108,8 @@ pub const SnapshotManager = struct {
 
         // Get file size
         const file = try compat.openFileAbsolute(path, .{});
-        defer file.close();
-        const stat = try file.stat();
+        defer file.close(compat.globalIo());
+        const stat = try file.stat(compat.globalIo());
 
         var snapshot = Snapshot{
             .timestamp = timestamp,
@@ -135,9 +135,11 @@ pub const SnapshotManager = struct {
         const file = compat.openFileAbsolute(path, .{}) catch {
             return error.SnapshotNotFound;
         };
-        defer file.close();
+        defer file.close(compat.globalIo());
 
-        const content = file.readToEndAlloc(self.allocator, 1024 * 1024) catch {
+        var rbuf: [4096]u8 = undefined;
+        var reader = file.reader(compat.globalIo(), &rbuf);
+        const content = reader.interface.readAlloc(self.allocator, 1024 * 1024) catch {
             return error.ReadError;
         };
         defer self.allocator.free(content);
@@ -168,10 +170,10 @@ pub const SnapshotManager = struct {
         var dir = compat.openDirAbsolute(self.snapshot_dir, .{ .iterate = true }) catch {
             return snapshots.toOwnedSlice();
         };
-        defer dir.close();
+        defer dir.close(compat.globalIo());
 
         var iter = dir.iterate();
-        while (try iter.next()) |entry| {
+        while (try iter.next(compat.globalIo())) |entry| {
             if (entry.kind != .file) continue;
 
             // Parse filename: snapshot_<timestamp>.conf
@@ -182,7 +184,7 @@ pub const SnapshotManager = struct {
             const timestamp = std.fmt.parseInt(i64, ts_str, 10) catch continue;
 
             // Get file size
-            const stat = dir.statFile(entry.name) catch continue;
+            const stat = dir.statFile(compat.globalIo(), entry.name, .{}) catch continue;
 
             var info = SnapshotInfo{
                 .timestamp = timestamp,

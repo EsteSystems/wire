@@ -111,7 +111,8 @@ pub const Reconciler = struct {
             }
 
             if (retries < self.policy.max_retries) {
-                std.Thread.sleep(self.policy.retry_delay_ms * std.time.ns_per_ms);
+                var ts: linux.timespec = .{ .sec = @intCast(self.policy.retry_delay_ms / 1000), .nsec = @intCast((self.policy.retry_delay_ms % 1000) * 1_000_000) };
+                _ = linux.nanosleep(&ts, null);
             }
         }
 
@@ -217,7 +218,8 @@ pub const Reconciler = struct {
                     };
                     // Wait for interface to be ready after bringing it up
                     if (d_up) {
-                        std.Thread.sleep(200 * std.time.ns_per_ms);
+                        var ts: linux.timespec = .{ .sec = 0, .nsec = 200 * 1_000_000 };
+                        _ = linux.nanosleep(&ts, null);
                     }
                 }
 

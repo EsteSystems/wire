@@ -175,7 +175,7 @@ pub const CaptureOptions = struct {
 /// Native packet capture implementation
 pub const Capturer = struct {
     allocator: std.mem.Allocator,
-    socket: posix.socket_t,
+    socket: i32,
     options: CaptureOptions,
     stats: CaptureStats,
     start_time_us: i64,
@@ -185,12 +185,14 @@ pub const Capturer = struct {
     pub fn init(allocator: std.mem.Allocator, options: CaptureOptions) !Self {
         // Create raw packet socket
         // AF_PACKET = 17, SOCK_RAW = 3, ETH_P_ALL = 0x0003
-        const sock = try posix.socket(
+        const sock_fd = linux.socket(
             linux.AF.PACKET,
-            posix.SOCK.RAW,
+            linux.SOCK.RAW,
             std.mem.nativeToBig(u16, ETH_P_ALL),
         );
-        errdefer posix.close(sock);
+        if (@as(isize, @bitCast(sock_fd)) < 0) return error.SocketCreationFailed;
+        const sock: i32 = @intCast(sock_fd);
+        errdefer _ = linux.close(sock);
 
         var self = Self{
             .allocator = allocator,
@@ -210,7 +212,7 @@ pub const Capturer = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        posix.close(self.socket);
+        _ = linux.close(self.socket);
     }
 
     fn configure(self: *Self) !void {
@@ -233,7 +235,7 @@ pub const Capturer = struct {
             sll.protocol = std.mem.nativeToBig(u16, ETH_P_ALL);
             sll.ifindex = ifr.ifru.ivalue;
 
-            try posix.bind(self.socket, @ptrCast(&sll), @sizeOf(linux.sockaddr.ll));
+            _ = linux.bind(self.socket, @ptrCast(&sll), @sizeOf(linux.sockaddr.ll));
 
             // Set promiscuous mode if requested
             if (self.options.promisc) {
@@ -241,38 +243,42 @@ pub const Capturer = struct {
                 mreq.mr_ifindex = ifr.ifru.ivalue;
                 mreq.mr_type = PACKET_MR_PROMISC;
 
-                posix.setsockopt(
+                _ = linux.setsockopt(
                     self.socket,
                     SOL_PACKET,
                     PACKET_ADD_MEMBERSHIP,
                     std.mem.asBytes(&mreq),
-                ) catch {}; // Ignore if promisc fails
+                    @sizeOf(@TypeOf(mreq)),
+                ); // Ignore if promisc fails
             }
         }
 
         // Set receive timeout for interruptible capture
-        const tv = posix.timeval{
+        const tv = linux.timeval{
             .sec = 1,
             .usec = 0,
         };
-        try posix.setsockopt(self.socket, posix.SOL.SOCKET, posix.SO.RCVTIMEO, std.mem.asBytes(&tv));
+        _ = linux.setsockopt(self.socket, linux.SOL.SOCKET, linux.SO.RCVTIMEO, std.mem.asBytes(&tv), @sizeOf(linux.timeval));
     }
 
     /// Capture a single packet
     pub fn captureOne(self: *Self) !?PacketInfo {
         var buf: [65536]u8 = undefined;
         var src_addr: linux.sockaddr.ll = undefined;
-        var addr_len: posix.socklen_t = @sizeOf(linux.sockaddr.ll);
+        var addr_len: linux.socklen_t = @sizeOf(linux.sockaddr.ll);
 
-        const recv_result = posix.recvfrom(
+        const recv_result = linux.recvfrom(
             self.socket,
             &buf,
+            buf.len,
             0,
             @ptrCast(&src_addr),
             &addr_len,
         );
 
-        if (recv_result) |len| {
+        const len_isize = @as(isize, @bitCast(recv_result));
+        if (len_isize > 0) {
+            const len: usize = @intCast(len_isize);
             if (len < ETH_HLEN) return null;
 
             const pkt = self.parsePacket(buf[0..len]);
@@ -284,9 +290,9 @@ pub const Capturer = struct {
             self.stats.bytes_captured += len;
 
             return pkt;
-        } else |err| {
-            if (err == error.WouldBlock) return null;
-            return err;
+        } else {
+            // Timeout or error
+            return null;
         }
     }
 

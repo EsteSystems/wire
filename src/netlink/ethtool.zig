@@ -172,7 +172,7 @@ pub const OffloadFeatures = struct {
 };
 
 /// Open a socket for ethtool ioctls
-fn openSocket() !posix.fd_t {
+fn openSocket() !i32 {
     const fd = linux.socket(linux.AF.INET, linux.SOCK.DGRAM, 0);
     if (@as(isize, @bitCast(fd)) < 0) {
         return error.SocketFailed;
@@ -181,7 +181,7 @@ fn openSocket() !posix.fd_t {
 }
 
 /// Get interface index by name
-fn getIfIndex(fd: posix.fd_t, name: []const u8) !i32 {
+fn getIfIndex(fd: i32, name: []const u8) !i32 {
     var ifr = IfReq{};
     const copy_len = @min(name.len, 15);
     @memcpy(ifr.name[0..copy_len], name[0..copy_len]);
@@ -194,7 +194,7 @@ fn getIfIndex(fd: posix.fd_t, name: []const u8) !i32 {
 }
 
 /// Execute ethtool ioctl
-fn ethtoolIoctl(fd: posix.fd_t, name: []const u8, data: *anyopaque) !void {
+fn ethtoolIoctl(fd: i32, name: []const u8, data: *anyopaque) !void {
     var ifr = IfReq{};
     const copy_len = @min(name.len, 15);
     @memcpy(ifr.name[0..copy_len], name[0..copy_len]);
@@ -209,7 +209,7 @@ fn ethtoolIoctl(fd: posix.fd_t, name: []const u8, data: *anyopaque) !void {
 /// Get driver info for an interface
 pub fn getDriverInfo(name: []const u8) !DriverInfo {
     const fd = try openSocket();
-    defer posix.close(fd);
+    defer _ = linux.close(fd);
 
     var info = EthtoolDrvInfo{};
     ethtoolIoctl(fd, name, @ptrCast(&info)) catch {
@@ -264,7 +264,7 @@ pub fn getDriverInfo(name: []const u8) !DriverInfo {
 /// Get ring buffer parameters
 pub fn getRingParams(name: []const u8) !RingParams {
     const fd = try openSocket();
-    defer posix.close(fd);
+    defer _ = linux.close(fd);
 
     var ring = EthtoolRingParam{};
     ethtoolIoctl(fd, name, @ptrCast(&ring)) catch {
@@ -282,7 +282,7 @@ pub fn getRingParams(name: []const u8) !RingParams {
 /// Set ring buffer parameters
 pub fn setRingParams(name: []const u8, rx: ?u32, tx: ?u32) !void {
     const fd = try openSocket();
-    defer posix.close(fd);
+    defer _ = linux.close(fd);
 
     // First get current params
     var ring = EthtoolRingParam{};
@@ -303,7 +303,7 @@ pub fn setRingParams(name: []const u8, rx: ?u32, tx: ?u32) !void {
 /// Get coalesce parameters
 pub fn getCoalesceParams(name: []const u8) !CoalesceParams {
     const fd = try openSocket();
-    defer posix.close(fd);
+    defer _ = linux.close(fd);
 
     var coal = EthtoolCoalesce{};
     ethtoolIoctl(fd, name, @ptrCast(&coal)) catch {
@@ -323,7 +323,7 @@ pub fn getCoalesceParams(name: []const u8) !CoalesceParams {
 /// Set coalesce parameters
 pub fn setCoalesceParams(name: []const u8, rx_usecs: ?u32, tx_usecs: ?u32) !void {
     const fd = try openSocket();
-    defer posix.close(fd);
+    defer _ = linux.close(fd);
 
     // First get current params
     var coal = EthtoolCoalesce{};
@@ -344,7 +344,7 @@ pub fn setCoalesceParams(name: []const u8, rx_usecs: ?u32, tx_usecs: ?u32) !void
 /// Check if link is up (carrier)
 pub fn getLinkStatus(name: []const u8) !bool {
     const fd = try openSocket();
-    defer posix.close(fd);
+    defer _ = linux.close(fd);
 
     var link = EthtoolValue{ .cmd = ETHTOOL.GLINK };
     ethtoolIoctl(fd, name, @ptrCast(&link)) catch {

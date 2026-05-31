@@ -385,11 +385,13 @@ pub const Supervisor = struct {
                 else => return err,
             }
         };
-        defer file.close();
+        defer file.close(compat.globalIo());
 
         var buf: [32]u8 = undefined;
         const pid_str = std.fmt.bufPrint(&buf, "{d}\n", .{self.pid}) catch unreachable;
-        try file.writeAll(pid_str);
+        var wbuf: [4096]u8 = undefined;
+        var writer = file.writer(compat.globalIo(), &wbuf);
+        try writer.interface.writeAll(pid_str);
     }
 
     /// Remove PID file
@@ -430,20 +432,24 @@ pub fn readPidFile(path: []const u8) !linux.pid_t {
             else => return err,
         }
     };
-    defer file.close();
+    defer file.close(compat.globalIo());
 
-    var buf: [32]u8 = undefined;
-    const bytes_read = try file.read(&buf);
-    if (bytes_read == 0) return error.InvalidPidFile;
+    var rbuf: [4096]u8 = undefined;
+    var reader = file.reader(compat.globalIo(), &rbuf);
+    const content = reader.interface.readAlloc(std.heap.page_allocator, 32) catch {
+        return error.InvalidPidFile;
+    };
+    defer std.heap.page_allocator.free(content);
+    if (content.len == 0) return error.InvalidPidFile;
 
     // Parse PID
-    const pid_str = std.mem.trimRight(u8, buf[0..bytes_read], "\n\r\t ");
+    const pid_str = std.mem.trim(u8, content, "\n\r\t ");
     const pid = std.fmt.parseInt(linux.pid_t, pid_str, 10) catch return error.InvalidPidFile;
 
     // Check if process is running
-    const result = linux.kill(pid, 0);
+    const result = linux.kill(pid, @enumFromInt(0));
     if (@as(isize, @bitCast(result)) < 0) {
-        const errno = linux.E.init(result);
+        const errno = linux.errno(result);
         if (errno == .SRCH) return error.NotRunning; // No such process
         if (errno == .PERM) return pid; // Process exists, we just can't signal it
     }
@@ -454,7 +460,7 @@ pub fn readPidFile(path: []const u8) !linux.pid_t {
 /// Send signal to daemon
 pub fn sendSignal(pid_file: []const u8, signal: i32) !void {
     const pid = try readPidFile(pid_file);
-    const result = linux.kill(pid, signal);
+    const result = linux.kill(pid, @enumFromInt(signal));
     if (@as(isize, @bitCast(result)) < 0) {
         return error.SignalFailed;
     }

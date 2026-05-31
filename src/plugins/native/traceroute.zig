@@ -103,7 +103,7 @@ pub const TraceOptions = struct {
 /// Native ICMP traceroute implementation
 pub const Tracer = struct {
     allocator: std.mem.Allocator,
-    socket: posix.socket_t,
+    socket: i32,
     identifier: u16,
     sequence: u16,
 
@@ -111,54 +111,57 @@ pub const Tracer = struct {
 
     pub fn init(allocator: std.mem.Allocator) !Self {
         // Create raw ICMP socket
-        const sock = posix.socket(
-            posix.AF.INET,
-            posix.SOCK.RAW | posix.SOCK.CLOEXEC,
-            posix.IPPROTO.ICMP,
-        ) catch |err| {
-            if (err == error.PermissionDenied) {
-                // Try DGRAM ICMP (available to unprivileged users on some systems)
-                return Self{
-                    .allocator = allocator,
-                    .socket = try posix.socket(
-                        posix.AF.INET,
-                        posix.SOCK.DGRAM | posix.SOCK.CLOEXEC,
-                        posix.IPPROTO.ICMP,
-                    ),
-                    .identifier = @truncate(@as(u64, @bitCast(compat.timestamp())) ^ 0xABCD),
-                    .sequence = 0,
-                };
-            }
-            return err;
-        };
+        const sock_fd = linux.socket(
+            linux.AF.INET,
+            linux.SOCK.RAW | linux.SOCK.CLOEXEC,
+            linux.IPPROTO.ICMP,
+        );
+        if (@as(isize, @bitCast(sock_fd)) >= 0) {
+            const sock: i32 = @intCast(sock_fd);
+            return Self{
+                .allocator = allocator,
+                .socket = sock,
+                .identifier = @truncate(@as(u64, @bitCast(compat.timestamp())) ^ 0xABCD),
+                .sequence = 0,
+            };
+        }
+
+        // Try DGRAM ICMP (available to unprivileged users on some systems)
+        const dgram_fd = linux.socket(
+            linux.AF.INET,
+            linux.SOCK.DGRAM | linux.SOCK.CLOEXEC,
+            linux.IPPROTO.ICMP,
+        );
+        if (@as(isize, @bitCast(dgram_fd)) < 0) return error.SocketCreationFailed;
+        const dgram_sock: i32 = @intCast(dgram_fd);
 
         return Self{
             .allocator = allocator,
-            .socket = sock,
+            .socket = dgram_sock,
             .identifier = @truncate(@as(u64, @bitCast(compat.timestamp())) ^ 0xABCD),
             .sequence = 0,
         };
     }
 
     pub fn deinit(self: *Self) void {
-        posix.close(self.socket);
+        _ = linux.close(self.socket);
     }
 
     /// Set socket options for a specific TTL
     fn setTTL(self: *Self, ttl: u8) !void {
         const ttl_val: i32 = ttl;
-        try posix.setsockopt(self.socket, posix.IPPROTO.IP, linux.IP.TTL, std.mem.asBytes(&ttl_val));
+        _ = linux.setsockopt(self.socket, linux.IPPROTO.IP, linux.IP.TTL, std.mem.asBytes(&ttl_val), @sizeOf(u8));
     }
 
     /// Set receive timeout
     fn setTimeout(self: *Self, timeout_ms: u32) !void {
         const timeout_sec = timeout_ms / 1000;
         const timeout_usec = (timeout_ms % 1000) * 1000;
-        const tv = posix.timeval{
+        const tv = linux.timeval{
             .sec = @intCast(timeout_sec),
             .usec = @intCast(timeout_usec),
         };
-        try posix.setsockopt(self.socket, posix.SOL.SOCKET, posix.SO.RCVTIMEO, std.mem.asBytes(&tv));
+        _ = linux.setsockopt(self.socket, linux.SOL.SOCKET, linux.SO.RCVTIMEO, std.mem.asBytes(&tv), @sizeOf(linux.timeval));
     }
 
     /// Bind to interface if specified
@@ -168,7 +171,7 @@ pub const Tracer = struct {
             const len = @min(iface.len, 15);
             @memcpy(iface_buf[0..len], iface[0..len]);
             iface_buf[len] = 0;
-            posix.setsockopt(self.socket, posix.SOL.SOCKET, posix.SO.BINDTODEVICE, iface_buf[0 .. len + 1]) catch {};
+            _ = linux.setsockopt(self.socket, linux.SOL.SOCKET, linux.SO.BINDTODEVICE, iface_buf[0..len].ptr, @intCast(len + 1));
         }
     }
 
@@ -212,8 +215,8 @@ pub const Tracer = struct {
         packet[3] = @truncate(checksum >> 8);
 
         // Destination address
-        var dest_addr = posix.sockaddr.in{
-            .family = posix.AF.INET,
+        var dest_addr = linux.sockaddr.in{
+            .family = linux.AF.INET,
             .port = 0,
             .addr = @bitCast(target_ip),
             .zero = [_]u8{0} ** 8,
@@ -221,31 +224,33 @@ pub const Tracer = struct {
 
         // Send
         const send_time = compat.microTimestamp();
-        _ = posix.sendto(
+        _ = linux.sendto(
             self.socket,
-            packet[0..total_size],
+            &packet,
+            total_size,
             0,
             @ptrCast(&dest_addr),
-            @sizeOf(posix.sockaddr.in),
-        ) catch {
-            return .{ .addr = null, .rtt_us = null, .reached = false };
-        };
+            @sizeOf(linux.sockaddr.in),
+        );
+        // sendto returns usize; negative means error, ignore send errors for traceroute
 
         // Wait for response
         var recv_buf: [512]u8 = undefined;
-        var src_addr: posix.sockaddr.in = undefined;
-        var addr_len: posix.socklen_t = @sizeOf(posix.sockaddr.in);
+        var src_addr: linux.sockaddr.in = undefined;
+        var addr_len: linux.socklen_t = @sizeOf(linux.sockaddr.in);
 
         // Try to receive (may get ICMP Time Exceeded or Echo Reply)
-        const recv_result = posix.recvfrom(
+        const recv_result = linux.recvfrom(
             self.socket,
             &recv_buf,
+            recv_buf.len,
             0,
             @ptrCast(&src_addr),
             &addr_len,
         );
 
-        if (recv_result) |bytes_received| {
+        const bytes_received = @as(isize, @bitCast(recv_result));
+        if (bytes_received > 0) {
             const recv_time = compat.microTimestamp();
             const rtt = @as(u64, @intCast(recv_time - send_time));
 
@@ -301,7 +306,7 @@ pub const Tracer = struct {
 
             // Unknown response, treat as no response
             return .{ .addr = null, .rtt_us = null, .reached = false };
-        } else |_| {
+        } else {
             // Timeout
             return .{ .addr = null, .rtt_us = null, .reached = false };
         }
