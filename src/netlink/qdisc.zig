@@ -237,7 +237,7 @@ pub fn addPfifoQdisc(if_index: i32, handle: u32, parent: u32, limit: ?u32) !void
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -272,7 +272,7 @@ pub fn addTbfQdisc(if_index: i32, handle: u32, parent: u32, rate_bps: u64, burst
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -329,7 +329,7 @@ pub fn addFqCodelQdisc(if_index: i32, handle: u32, parent: u32) !void {
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -356,7 +356,7 @@ pub fn deleteQdisc(if_index: i32, handle: u32, parent: u32) !void {
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -382,7 +382,7 @@ pub fn addHtbQdisc(if_index: i32, handle: u32, parent: u32, default_class: ?u32)
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -539,7 +539,7 @@ pub fn addHtbClass(if_index: i32, classid: u32, parent: u32, rate_bps: u64, ceil
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -605,7 +605,7 @@ pub fn deleteClass(if_index: i32, classid: u32) !void {
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -630,7 +630,7 @@ pub fn replaceQdisc(if_index: i32, kind: []const u8) !void {
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -820,7 +820,7 @@ pub fn addU32FilterDstIP(if_index: i32, parent: u32, prio: u16, dst_ip: [4]u8, d
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -880,7 +880,7 @@ pub fn addFwFilter(if_index: i32, parent: u32, prio: u16, fwmark: u32, classid: 
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -918,7 +918,7 @@ pub fn deleteFilter(if_index: i32, parent: u32, prio: u16, handle: u32, protocol
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

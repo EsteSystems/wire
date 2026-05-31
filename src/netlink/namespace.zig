@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("../compat.zig");
 const socket = @import("socket.zig");
 const linux = std.os.linux;
 const posix = std.posix;
@@ -27,7 +28,7 @@ pub fn listNamespaces(allocator: std.mem.Allocator) ![]Namespace {
     errdefer namespaces.deinit();
 
     // Open /var/run/netns directory
-    var dir = std.fs.openDirAbsolute(NETNS_PATH, .{ .iterate = true }) catch |err| {
+    var dir = compat.openDirAbsolute(NETNS_PATH, .{ .iterate = true }) catch |err| {
         if (err == error.FileNotFound) {
             // Directory doesn't exist, no namespaces
             return namespaces.toOwnedSlice();
@@ -57,7 +58,7 @@ pub fn listNamespaces(allocator: std.mem.Allocator) ![]Namespace {
 /// Create a new named network namespace
 pub fn createNamespace(name: []const u8) !void {
     // Ensure /var/run/netns exists
-    std.fs.makeDirAbsolute(NETNS_PATH) catch |err| {
+    compat.makeDirAbsolute(NETNS_PATH) catch |err| {
         if (err != error.PathAlreadyExists) {
             return err;
         }
@@ -70,7 +71,7 @@ pub fn createNamespace(name: []const u8) !void {
     };
 
     // Create the namespace file (will be used as mount point)
-    const file = std.fs.createFileAbsolute(path, .{}) catch |err| {
+    const file = compat.createFileAbsolute(path, .{}) catch |err| {
         return err;
     };
     file.close();
@@ -114,7 +115,7 @@ pub fn createNamespace(name: []const u8) !void {
     } else if (pid < 0) {
         // Fork failed
         // Clean up the file we created
-        std.fs.deleteFileAbsolute(path) catch {};
+        compat.deleteFileAbsolute(path) catch {};
         return error.ForkFailed;
     } else {
         // Parent process - wait for child
@@ -125,11 +126,11 @@ pub fn createNamespace(name: []const u8) !void {
         if (linux.W.IFEXITED(status)) {
             const exit_code = linux.W.EXITSTATUS(status);
             if (exit_code != 0) {
-                std.fs.deleteFileAbsolute(path) catch {};
+                compat.deleteFileAbsolute(path) catch {};
                 return if (exit_code == 1) error.UnshareFailedChild else error.MountFailed;
             }
         } else {
-            std.fs.deleteFileAbsolute(path) catch {};
+            compat.deleteFileAbsolute(path) catch {};
             return error.ChildFailed;
         }
     }
@@ -151,7 +152,7 @@ pub fn deleteNamespace(name: []const u8) !void {
     _ = linux.umount(@ptrCast(&path_z));
 
     // Delete the file
-    std.fs.deleteFileAbsolute(path) catch |err| {
+    compat.deleteFileAbsolute(path) catch |err| {
         if (err != error.FileNotFound) {
             return err;
         }
@@ -165,7 +166,7 @@ pub fn namespaceExists(name: []const u8) bool {
         return false;
     };
 
-    std.fs.accessAbsolute(path, .{}) catch {
+    compat.accessAbsolute(path, .{}) catch {
         return false;
     };
     return true;
@@ -178,7 +179,7 @@ pub fn openNamespace(name: []const u8) !posix.fd_t {
         return error.NameTooLong;
     };
 
-    const file = try std.fs.openFileAbsolute(path, .{});
+    const file = try compat.openFileAbsolute(path, .{});
     return file.handle;
 }
 
@@ -202,7 +203,7 @@ pub fn moveInterfaceToNamespace(if_index: i32, ns_name: []const u8) !void {
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -227,7 +228,7 @@ pub fn moveInterfaceToPid(if_index: i32, pid: i32) !void {
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

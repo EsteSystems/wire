@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("../compat.zig");
 const posix = std.posix;
 const linux = std.os.linux;
 
@@ -82,17 +83,19 @@ pub const ProbeResult = struct {
 
 /// Parse /etc/services and find a service by name
 pub fn lookupService(allocator: std.mem.Allocator, name: []const u8, protocol: ?Protocol) !?Service {
-    const file = std.fs.openFileAbsolute("/etc/services", .{}) catch |err| {
+    const file = compat.openFileAbsolute("/etc/services", .{}) catch |err| {
         if (err == error.FileNotFound) return null;
         return err;
     };
     defer file.close();
 
-    const reader = file.deprecatedReader();
+    var reader_buf: [4096]u8 = undefined;
+    var reader = file.reader(compat.globalIo(), &reader_buf);
+    const reader_iface = &reader.interface;
 
     var line_buf: [512]u8 = undefined;
 
-    while (reader.readUntilDelimiterOrEof(&line_buf, '\n') catch null) |line| {
+    while (reader_iface.readUntilDelimiterOrEof(&line_buf, '\n') catch null) |line| {
         // Skip empty lines and comments
         const trimmed = std.mem.trim(u8, line, " \t");
         if (trimmed.len == 0 or trimmed[0] == '#') continue;
@@ -172,17 +175,19 @@ pub fn resolvePort(allocator: std.mem.Allocator, port_or_service: []const u8, pr
 
 /// Lookup just the port number (no allocations)
 pub fn lookupServicePort(name: []const u8, protocol: ?Protocol) !?u16 {
-    const file = std.fs.openFileAbsolute("/etc/services", .{}) catch |err| {
+    const file = compat.openFileAbsolute("/etc/services", .{}) catch |err| {
         if (err == error.FileNotFound) return null;
         return err;
     };
     defer file.close();
 
-    const reader = file.deprecatedReader();
+    var reader_buf: [4096]u8 = undefined;
+    var reader = file.reader(compat.globalIo(), &reader_buf);
+    const reader_iface = &reader.interface;
 
     var line_buf: [512]u8 = undefined;
 
-    while (reader.readUntilDelimiterOrEof(&line_buf, '\n') catch null) |line| {
+    while (reader_iface.readUntilDelimiterOrEof(&line_buf, '\n') catch null) |line| {
         const trimmed = std.mem.trim(u8, line, " \t");
         if (trimmed.len == 0 or trimmed[0] == '#') continue;
 
@@ -254,7 +259,7 @@ fn parseIPv4(ip: []const u8) ?[4]u8 {
 
 /// Probe a TCP port on a host
 pub fn probeTcp(target: []const u8, port: u16, timeout_ms: u32) ProbeResult {
-    const start_time = std.time.microTimestamp();
+    const start_time = compat.microTimestamp();
 
     // Parse IP address
     const ip_bytes = parseIPv4(target) orelse {
@@ -293,7 +298,7 @@ pub fn probeTcp(target: []const u8, port: u16, timeout_ms: u32) ProbeResult {
 
     if (connect_result) |_| {
         // Immediate success (rare, but possible on localhost)
-        const end_time = std.time.microTimestamp();
+        const end_time = compat.microTimestamp();
         return ProbeResult{
             .target = target,
             .port = port,
@@ -342,7 +347,7 @@ pub fn probeTcp(target: []const u8, port: u16, timeout_ms: u32) ProbeResult {
         };
     };
 
-    const end_time = std.time.microTimestamp();
+    const end_time = compat.microTimestamp();
     const latency: u64 = @intCast(end_time - start_time);
 
     if (poll_result == 0) {

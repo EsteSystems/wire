@@ -196,7 +196,7 @@ pub fn addRoute(family: u8, dst: ?[]const u8, dst_len: u8, gateway: ?[]const u8,
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -252,7 +252,7 @@ pub fn addEcmpRoute(family: u8, dst: ?[]const u8, dst_len: u8, nexthops: []const
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -313,7 +313,7 @@ pub fn deleteRoute(family: u8, dst: ?[]const u8, dst_len: u8) !void {
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

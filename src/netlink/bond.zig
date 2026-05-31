@@ -246,7 +246,7 @@ pub fn createBondWithOptions(name: []const u8, options: BondOptions) !void {
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -271,7 +271,7 @@ pub fn createBond(name: []const u8, mode: BondMode) !void {
 
 /// Modify an existing bond interface's options
 pub fn modifyBond(name: []const u8, options: BondOptions) !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -311,7 +311,7 @@ pub fn deleteBond(name: []const u8) !void {
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -336,7 +336,7 @@ pub fn deleteBond(name: []const u8) !void {
 
 /// Add a member interface to a bond with validation
 pub fn addBondMember(bond_name: []const u8, member_name: []const u8) !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -395,7 +395,7 @@ pub fn addBondMember(bond_name: []const u8, member_name: []const u8) !void {
 
 /// Remove a member interface from a bond
 pub fn removeBondMember(member_name: []const u8) !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

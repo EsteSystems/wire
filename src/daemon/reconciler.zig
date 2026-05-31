@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("../compat.zig");
 const state_types = @import("../state/types.zig");
 const state_live = @import("../state/live.zig");
 const state_diff = @import("../state/diff.zig");
@@ -70,7 +71,7 @@ pub const Reconciler = struct {
     /// Reconcile: apply changes from diff to make live state match desired
     pub fn reconcile(self: *Self, diff: *const state_types.StateDiff) !ReconcileStats {
         self.stats = ReconcileStats{
-            .start_time = std.time.timestamp(),
+            .start_time = compat.timestamp(),
             .total_changes = diff.changes.items.len,
         };
         self.results.clearRetainingCapacity();
@@ -89,7 +90,7 @@ pub const Reconciler = struct {
             }
         }
 
-        self.stats.end_time = std.time.timestamp();
+        self.stats.end_time = compat.timestamp();
         return self.stats;
     }
 

@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("../../compat.zig");
 const posix = std.posix;
 const linux = std.os.linux;
 
@@ -141,7 +142,7 @@ pub const CaptureStats = struct {
     start_time_us: i64,
 
     pub fn format(self: *const CaptureStats, writer: anytype) !void {
-        const elapsed_us = std.time.microTimestamp() - self.start_time_us;
+        const elapsed_us = compat.microTimestamp() - self.start_time_us;
         const elapsed_secs = @as(f64, @floatFromInt(elapsed_us)) / 1_000_000.0;
 
         try writer.print("\n--- Capture Statistics ---\n", .{});
@@ -199,9 +200,9 @@ pub const Capturer = struct {
                 .packets_captured = 0,
                 .bytes_captured = 0,
                 .packets_dropped = 0,
-                .start_time_us = std.time.microTimestamp(),
+                .start_time_us = compat.microTimestamp(),
             },
-            .start_time_us = std.time.microTimestamp(),
+            .start_time_us = compat.microTimestamp(),
         };
 
         try self.configure();
@@ -292,7 +293,7 @@ pub const Capturer = struct {
     /// Parse packet headers
     fn parsePacket(self: *Self, data: []const u8) PacketInfo {
         var pkt = PacketInfo{
-            .timestamp_us = std.time.microTimestamp() - self.start_time_us,
+            .timestamp_us = compat.microTimestamp() - self.start_time_us,
             .length = data.len,
             .dst_mac = data[0..6].*,
             .src_mac = data[6..12].*,
@@ -390,14 +391,14 @@ pub const Capturer = struct {
     /// Run capture loop
     pub fn capture(self: *Self, writer: anytype) !void {
         const deadline: ?i64 = if (self.options.duration_secs) |secs|
-            std.time.microTimestamp() + @as(i64, secs) * 1_000_000
+            compat.microTimestamp() + @as(i64, secs) * 1_000_000
         else
             null;
 
         while (true) {
             // Check duration limit
             if (deadline) |d| {
-                if (std.time.microTimestamp() >= d) break;
+                if (compat.microTimestamp() >= d) break;
             }
 
             // Check count limit

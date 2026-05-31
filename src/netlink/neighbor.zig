@@ -380,7 +380,7 @@ pub fn addNeighbor(if_index: i32, ip: []const u8, mac: [6]u8, permanent: bool) !
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -433,7 +433,7 @@ pub fn deleteNeighbor(if_index: i32, ip: []const u8) !void {
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

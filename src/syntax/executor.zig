@@ -47,15 +47,20 @@ pub const ExecuteError = error{
 /// Command executor - bridges parser to netlink operations
 pub const Executor = struct {
     allocator: std.mem.Allocator,
-    stdout: std.fs.File.DeprecatedWriter,
+    stdout_buf: [4096]u8 = undefined,
+    stdout_w: std.Io.File.Writer = undefined,
+    stdout: *std.Io.Writer,
 
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator) Self {
-        return Self{
+    pub fn init(allocator: std.mem.Allocator, io: std.Io) Self {
+        var self = Self{
             .allocator = allocator,
-            .stdout = std.fs.File.stdout().deprecatedWriter(),
+            .stdout = undefined,
         };
+        self.stdout_w = std.Io.File.stdout().writerStreaming(io, &self.stdout_buf);
+        self.stdout = &self.stdout_w.interface;
+        return self;
     }
 
     /// Execute a parsed command

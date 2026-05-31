@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("../compat.zig");
 const state_types = @import("../state/types.zig");
 
 /// Change type categories
@@ -65,7 +66,7 @@ pub const ChangeEntry = struct {
         details: []const u8,
     ) Self {
         var entry = Self{
-            .timestamp = std.time.timestamp(),
+            .timestamp = compat.timestamp(),
             .change_type = change_type,
             .target = undefined,
             .target_len = 0,
@@ -196,12 +197,12 @@ pub const ChangeLogger = struct {
     /// Ensure parent directory exists (creates full path)
     fn ensureDir(self: *Self) !void {
         // Get parent directory
-        const parent = std.fs.path.dirname(self.log_path) orelse return;
+        const parent = compat.path.dirname(self.log_path) orelse return;
 
         // Open root as base for makePath
-        var root = std.fs.openDirAbsolute("/", .{}) catch {
+        var root = compat.openDirAbsolute("/", .{}) catch {
             // Fallback: try makeDirAbsolute
-            std.fs.makeDirAbsolute(parent) catch |err| {
+            compat.makeDirAbsolute(parent) catch |err| {
                 if (err != error.PathAlreadyExists) {
                     return err;
                 }
@@ -227,12 +228,12 @@ pub const ChangeLogger = struct {
     pub fn logChange(self: *Self, entry: ChangeEntry) !void {
         try self.ensureDir();
 
-        const file = std.fs.createFileAbsolute(self.log_path, .{
+        const file = compat.createFileAbsolute(self.log_path, .{
             .truncate = false,
         }) catch |err| {
             if (err == error.PathAlreadyExists) {
                 // File exists, open for append
-                const f = try std.fs.openFileAbsolute(self.log_path, .{ .mode = .write_only });
+                const f = try compat.openFileAbsolute(self.log_path, .{ .mode = .write_only });
                 try f.seekFromEnd(0);
                 var buf: [512]u8 = undefined;
                 const line = try entry.serialize(&buf);
@@ -281,7 +282,7 @@ pub const ChangeLogger = struct {
         var entries = std.array_list.Managed(ChangeEntry).init(self.allocator);
         errdefer entries.deinit();
 
-        const file = std.fs.openFileAbsolute(self.log_path, .{}) catch {
+        const file = compat.openFileAbsolute(self.log_path, .{}) catch {
             return entries.toOwnedSlice();
         };
         defer file.close();

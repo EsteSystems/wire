@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("../../compat.zig");
 const posix = std.posix;
 const linux = std.os.linux;
 
@@ -135,7 +136,7 @@ pub const Pinger = struct {
                         posix.SOCK.DGRAM | posix.SOCK.CLOEXEC,
                         posix.IPPROTO.ICMP,
                     ),
-                    .identifier = @truncate(@as(u64, @bitCast(std.time.timestamp()))),
+                    .identifier = @truncate(@as(u64, @bitCast(compat.timestamp()))),
                     .sequence = 0,
                 };
             }
@@ -145,7 +146,7 @@ pub const Pinger = struct {
         return Self{
             .allocator = allocator,
             .socket = sock,
-            .identifier = @truncate(@as(u64, @bitCast(std.time.timestamp()))),
+            .identifier = @truncate(@as(u64, @bitCast(compat.timestamp()))),
             .sequence = 0,
         };
     }
@@ -211,7 +212,7 @@ pub const Pinger = struct {
         // Add timestamp to payload
         const payload_start: usize = 8; // ICMP header size
         const payload_size = @min(options.packet_size, packet.len - payload_start);
-        const timestamp = std.time.microTimestamp();
+        const timestamp = compat.microTimestamp();
         if (payload_size >= 8) {
             const ts_bytes: [8]u8 = @bitCast(timestamp);
             @memcpy(packet[payload_start .. payload_start + 8], &ts_bytes);
@@ -238,7 +239,7 @@ pub const Pinger = struct {
         };
 
         // Send packet
-        const send_time = std.time.microTimestamp();
+        const send_time = compat.microTimestamp();
         _ = posix.sendto(
             self.socket,
             packet[0..total_size],
@@ -269,7 +270,7 @@ pub const Pinger = struct {
             );
 
             if (recv_result) |bytes_received| {
-                const recv_time = std.time.microTimestamp();
+                const recv_time = compat.microTimestamp();
 
                 if (bytes_received < 28) continue; // IP header (20) + ICMP header (8)
 

@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("../compat.zig");
 const types = @import("types.zig");
 
 /// Export options for selective state export
@@ -124,11 +125,13 @@ pub const StateExporter = struct {
 
     /// Export to file
     pub fn exportToFile(self: *Self, state: *const types.NetworkState, path: []const u8) !void {
-        const file = try std.fs.cwd().createFile(path, .{});
-        defer file.close();
+        const file = try compat.cwd().createFile(compat.globalIo(), path, .{});
+        defer file.close(compat.globalIo());
 
-        const writer = file.deprecatedWriter();
-        try self.exportToWriter(state, writer);
+        var writer_buf: [4096]u8 = undefined;
+        var writer = file.writer(compat.globalIo(), &writer_buf);
+        const writer_iface = &writer.interface;
+        try self.exportToWriter(state, writer_iface);
     }
 
     fn exportBonds(self: *Self, state: *const types.NetworkState, writer: anytype) !void {

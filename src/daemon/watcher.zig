@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("../compat.zig");
 const linux = std.os.linux;
 
 /// Inotify event masks
@@ -116,8 +117,8 @@ pub const FileWatcher = struct {
     pub fn addWatch(self: *Self, path: []const u8) !void {
         // We need to watch the directory containing the file, not the file itself
         // This is because editors often create a new file and rename it
-        const dir_path = std.fs.path.dirname(path) orelse ".";
-        const file_name = std.fs.path.basename(path);
+        const dir_path = compat.path.dirname(path) orelse ".";
+        const file_name = compat.path.basename(path);
 
         // Check if we're already watching this directory
         for (self.watch_descriptors.items) |info| {
@@ -279,7 +280,7 @@ pub const ConfigWatcher = struct {
     pub fn poll(self: *Self) bool {
         const events = self.watcher.poll();
         if (events > 0) {
-            const now = std.time.milliTimestamp();
+            const now = compat.milliTimestamp();
             // Debounce: only mark as pending if enough time has passed
             if (now - self.last_event_time > self.debounce_ms) {
                 self.reload_pending = true;
@@ -289,7 +290,7 @@ pub const ConfigWatcher = struct {
 
         // Check if we should trigger reload
         if (self.reload_pending) {
-            const now = std.time.milliTimestamp();
+            const now = compat.milliTimestamp();
             if (now - self.last_event_time >= self.debounce_ms) {
                 self.reload_pending = false;
                 return true;

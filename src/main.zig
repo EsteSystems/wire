@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("compat.zig");
 const netlink_interface = @import("netlink/interface.zig");
 const netlink_address = @import("netlink/address.zig");
 const netlink_route = @import("netlink/route.zig");
@@ -40,35 +41,39 @@ const linux = std.os.linux;
 
 const version = "1.0.0";
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
 
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+    // Collect command-line args
+    var args_iter = std.process.Args.Iterator.init(init.minimal.args);
+    var args_list = std.array_list.Managed([]const u8).init(allocator);
+    defer args_list.deinit();
+    while (args_iter.next()) |arg| {
+        try args_list.append(try allocator.dupe(u8, arg));
+    }
+    const args = args_list.items;
 
     if (args.len < 2) {
-        try printUsage();
+        try printUsage(init.io);
         return;
     }
 
     const first_arg = args[1];
 
     if (std.mem.eql(u8, first_arg, "--version") or std.mem.eql(u8, first_arg, "-v")) {
-        try printVersion();
+        try printVersion(init.io);
         return;
     }
 
     if (std.mem.eql(u8, first_arg, "--help") or std.mem.eql(u8, first_arg, "-h")) {
-        try printUsage();
+        try printUsage(init.io);
         return;
     }
 
     // Execute command (handles --json flag internally)
-    executeCommand(allocator, args[1..]) catch |err| {
+    executeCommand(allocator, init.io, args[1..]) catch |err| {
         var stderr_buf: [4096]u8 = undefined;
-        var stderr_w = std.fs.File.stderr().writerStreaming(&stderr_buf);
+        var stderr_w = std.Io.File.stderr().writerStreaming(init.io, &stderr_buf);
         const stderr = &stderr_w.interface;
         defer stderr.flush() catch {};
         try stderr.print("Error: {}\n", .{err});
@@ -76,9 +81,9 @@ pub fn main() !void {
     };
 }
 
-fn executeCommand(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn executeCommand(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
     if (args.len == 0) {
-        try printUsage();
+        try printUsage(io);
         return;
     }
 
@@ -87,7 +92,7 @@ fn executeCommand(allocator: std.mem.Allocator, args: []const []const u8) !void 
     const cmd_idx: usize = if (has_json) 1 else 0;
 
     if (cmd_idx >= args.len) {
-        try printUsage();
+        try printUsage(io);
         return;
     }
 
@@ -108,62 +113,62 @@ fn executeCommand(allocator: std.mem.Allocator, args: []const []const u8) !void 
     const handler_args = handler_args_list.items;
 
     if (std.mem.eql(u8, subject, "interface")) {
-        try handleInterface(allocator, handler_args);
+        try handleInterface(allocator, io, handler_args);
     } else if (std.mem.eql(u8, subject, "route")) {
-        try handleRoute(allocator, handler_args);
+        try handleRoute(allocator, io, handler_args);
     } else if (std.mem.eql(u8, subject, "analyze")) {
-        try handleAnalyze(allocator);
+        try handleAnalyze(allocator, io);
     } else if (std.mem.eql(u8, subject, "apply")) {
-        try handleApply(allocator, handler_args);
+        try handleApply(allocator, io, handler_args);
     } else if (std.mem.eql(u8, subject, "validate")) {
-        try handleValidate(allocator, handler_args);
+        try handleValidate(allocator, io, handler_args);
     } else if (std.mem.eql(u8, subject, "bond")) {
-        try handleBond(allocator, handler_args);
+        try handleBond(allocator, io, handler_args);
     } else if (std.mem.eql(u8, subject, "bridge")) {
-        try handleBridge(allocator, handler_args);
+        try handleBridge(allocator, io, handler_args);
     } else if (std.mem.eql(u8, subject, "vlan")) {
-        try handleVlan(allocator, handler_args);
+        try handleVlan(allocator, io, handler_args);
     } else if (std.mem.eql(u8, subject, "veth")) {
-        try handleVeth(allocator, handler_args);
+        try handleVeth(allocator, io, handler_args);
     } else if (std.mem.eql(u8, subject, "state")) {
-        try handleState(allocator, handler_args);
+        try handleState(allocator, io, handler_args);
     } else if (std.mem.eql(u8, subject, "diff")) {
-        try handleDiff(allocator, handler_args);
+        try handleDiff(allocator, io, handler_args);
     } else if (std.mem.eql(u8, subject, "events")) {
-        try handleEvents(handler_args);
+        try handleEvents(io, handler_args);
     } else if (std.mem.eql(u8, subject, "reconcile")) {
-        try handleReconcile(allocator, handler_args);
+        try handleReconcile(allocator, io, handler_args);
     } else if (std.mem.eql(u8, subject, "daemon")) {
-        try handleDaemon(allocator, handler_args);
+        try handleDaemon(allocator, io, handler_args);
     } else if (std.mem.eql(u8, subject, "history")) {
-        try handleHistory(allocator, handler_args);
+        try handleHistory(allocator, io, handler_args);
     } else if (std.mem.eql(u8, subject, "neighbor")) {
-        try handleNeighbor(allocator, handler_args);
+        try handleNeighbor(allocator, io, handler_args);
     } else if (std.mem.eql(u8, subject, "rule")) {
-        try handleRule(allocator, handler_args);
+        try handleRule(allocator, io, handler_args);
     } else if (std.mem.eql(u8, subject, "netns") or std.mem.eql(u8, subject, "namespace")) {
-        try handleNamespace(allocator, handler_args);
+        try handleNamespace(allocator, io, handler_args);
     } else if (std.mem.eql(u8, subject, "hw") or std.mem.eql(u8, subject, "hardware")) {
-        try handleHardware(allocator, handler_args);
+        try handleHardware(allocator, io, handler_args);
     } else if (std.mem.eql(u8, subject, "tunnel")) {
-        try handleTunnel(allocator, handler_args);
+        try handleTunnel(allocator, io, handler_args);
     } else if (std.mem.eql(u8, subject, "tc") or std.mem.eql(u8, subject, "qdisc")) {
-        try handleTc(allocator, handler_args);
+        try handleTc(allocator, io, handler_args);
     } else if (std.mem.eql(u8, subject, "topology")) {
-        try handleTopology(allocator, handler_args);
+        try handleTopology(allocator, io, handler_args);
     } else if (std.mem.eql(u8, subject, "diagnose")) {
-        try handleDiagnose(allocator, handler_args);
+        try handleDiagnose(allocator, io, handler_args);
     } else if (std.mem.eql(u8, subject, "trace")) {
-        try handlePathTrace(allocator, handler_args);
+        try handlePathTrace(allocator, io, handler_args);
     } else if (std.mem.eql(u8, subject, "probe")) {
-        try handleProbe(allocator, handler_args);
+        try handleProbe(allocator, io, handler_args);
     } else if (std.mem.eql(u8, subject, "validate")) {
-        try handleValidate(allocator, handler_args);
+        try handleValidate(allocator, io, handler_args);
     } else if (std.mem.eql(u8, subject, "watch")) {
-        try handleWatch(allocator, handler_args);
+        try handleWatch(allocator, io, handler_args);
     } else {
         var stderr_buf: [4096]u8 = undefined;
-        var stderr_w = std.fs.File.stderr().writerStreaming(&stderr_buf);
+        var stderr_w = std.Io.File.stderr().writerStreaming(io, &stderr_buf);
         const stderr = &stderr_w.interface;
         defer stderr.flush() catch {};
         try stderr.print("Unknown command: {s}\n", .{subject});
@@ -171,9 +176,9 @@ fn executeCommand(allocator: std.mem.Allocator, args: []const []const u8) !void 
     }
 }
 
-fn handleInterface(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn handleInterface(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
     const use_json = json_output.hasJsonFlag(args);
@@ -316,7 +321,7 @@ fn handleInterface(allocator: std.mem.Allocator, args: []const []const u8) !void
 
     // wire interface <name> stats
     if (std.mem.eql(u8, action, "stats")) {
-        try handleInterfaceStats(allocator, iface_name);
+        try handleInterfaceStats(allocator, io, iface_name);
         return;
     }
 
@@ -358,9 +363,9 @@ fn handleInterface(allocator: std.mem.Allocator, args: []const []const u8) !void
     try stdout.print("Unknown action: {s}\n", .{action});
 }
 
-fn handleRoute(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn handleRoute(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
     const use_json = json_output.hasJsonFlag(args);
@@ -505,9 +510,9 @@ fn handleRoute(allocator: std.mem.Allocator, args: []const []const u8) !void {
     try stdout.print("Unknown action: {s}\n", .{action});
 }
 
-fn handleAnalyze(allocator: std.mem.Allocator) !void {
+fn handleAnalyze(allocator: std.mem.Allocator, io: std.Io) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
 
@@ -598,9 +603,9 @@ fn handleAnalyze(allocator: std.mem.Allocator) !void {
     try stdout.print("\n", .{});
 }
 
-fn handleApply(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn handleApply(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
 
@@ -658,9 +663,9 @@ fn handleApply(allocator: std.mem.Allocator, args: []const []const u8) !void {
     }
 }
 
-fn handleBond(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn handleBond(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
     const use_json = json_output.hasJsonFlag(args);
@@ -879,9 +884,9 @@ fn showBondDetails(allocator: std.mem.Allocator, name: []const u8, stdout: anyty
     }
 }
 
-fn handleBridge(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn handleBridge(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
 
@@ -1134,9 +1139,9 @@ fn showAllBridgeFdb(allocator: std.mem.Allocator, stdout: anytype) !void {
     }
 }
 
-fn handleVlan(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn handleVlan(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
 
@@ -1217,9 +1222,9 @@ fn handleVlan(allocator: std.mem.Allocator, args: []const []const u8) !void {
     try stdout.print("Invalid VLAN command. Run 'wire vlan' for help.\n", .{});
 }
 
-fn handleVeth(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn handleVeth(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
 
@@ -1324,9 +1329,9 @@ fn showVethDetails(allocator: std.mem.Allocator, name: []const u8, writer: anyty
     }
 }
 
-fn handleState(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn handleState(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
 
@@ -1416,9 +1421,9 @@ fn handleState(allocator: std.mem.Allocator, args: []const []const u8) !void {
     }
 }
 
-fn handleStateExport(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn handleStateExport(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
 
@@ -1469,9 +1474,9 @@ fn handleStateExport(allocator: std.mem.Allocator, args: []const []const u8) !vo
     }
 }
 
-fn handleEvents(args: []const []const u8) !void {
+fn handleEvents(io: std.Io, args: []const []const u8) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
 
@@ -1510,10 +1515,10 @@ fn handleEvents(args: []const []const u8) !void {
     monitor.setCallback(Context.callback, @ptrCast(&ctx));
 
     // Poll for events
-    const start_time = std.time.timestamp();
+    const start_time = compat.timestamp();
     const end_time = start_time + duration_secs;
 
-    while (std.time.timestamp() < end_time) {
+    while (compat.timestamp() < end_time) {
         const result = monitor.poll(1000); // 1 second timeout
         if (result < 0) {
             try stdout.print("Error polling events\n", .{});
@@ -1524,9 +1529,9 @@ fn handleEvents(args: []const []const u8) !void {
     try stdout.print("\nMonitoring complete. {d} events received.\n", .{ctx.event_count});
 }
 
-fn handleDaemon(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn handleDaemon(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
     const pid_file = "/run/wire.pid";
@@ -1698,9 +1703,9 @@ fn reloadViaSignal(stdout: anytype, pid_file: []const u8) !void {
     try stdout.print("Reload signal sent\n", .{});
 }
 
-fn handleReconcile(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn handleReconcile(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
 
@@ -1801,9 +1806,9 @@ fn handleReconcile(allocator: std.mem.Allocator, args: []const []const u8) !void
     }
 }
 
-fn handleDiff(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn handleDiff(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
 
@@ -1890,9 +1895,9 @@ fn showVlanDetails(allocator: std.mem.Allocator, name: []const u8, stdout: anyty
     }
 }
 
-fn handleHistory(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn handleHistory(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
 
@@ -2020,9 +2025,9 @@ fn handleHistory(allocator: std.mem.Allocator, args: []const []const u8) !void {
     }
 }
 
-fn handleNeighbor(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn handleNeighbor(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
     const use_json = json_output.hasJsonFlag(args);
@@ -2263,9 +2268,9 @@ fn handleNeighbor(allocator: std.mem.Allocator, args: []const []const u8) !void 
     }
 }
 
-fn handleRule(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn handleRule(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
     const use_json = json_output.hasJsonFlag(args);
@@ -2480,9 +2485,9 @@ fn handleRule(allocator: std.mem.Allocator, args: []const []const u8) !void {
     }
 }
 
-fn handleNamespace(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn handleNamespace(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
 
@@ -2637,9 +2642,9 @@ fn handleNamespace(allocator: std.mem.Allocator, args: []const []const u8) !void
     }
 }
 
-fn handleHardware(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn handleHardware(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
     const use_json = json_output.hasJsonFlag(args);
@@ -2856,9 +2861,9 @@ fn handleHardware(allocator: std.mem.Allocator, args: []const []const u8) !void 
     }
 }
 
-fn handleTunnel(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn handleTunnel(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
 
@@ -3281,9 +3286,9 @@ fn handleTunnel(allocator: std.mem.Allocator, args: []const []const u8) !void {
     }
 }
 
-fn handleTc(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn handleTc(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
     const use_json = json_output.hasJsonFlag(args);
@@ -4013,9 +4018,9 @@ fn parseClassId(s: []const u8) ?u32 {
     }
 }
 
-fn handleTopology(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn handleTopology(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
 
@@ -4108,9 +4113,9 @@ fn handleTopology(allocator: std.mem.Allocator, args: []const []const u8) !void 
     }
 }
 
-fn handleDiagnose(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn handleDiagnose(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
 
@@ -4143,20 +4148,20 @@ fn handleDiagnose(allocator: std.mem.Allocator, args: []const []const u8) !void 
     const subcommand = args[0];
 
     if (std.mem.eql(u8, subcommand, "ping")) {
-        try handleDiagnosePing(allocator, args[1..]);
+        try handleDiagnosePing(allocator, io, args[1..]);
     } else if (std.mem.eql(u8, subcommand, "trace") or std.mem.eql(u8, subcommand, "traceroute")) {
-        try handleDiagnoseTrace(allocator, args[1..]);
+        try handleDiagnoseTrace(allocator, io, args[1..]);
     } else if (std.mem.eql(u8, subcommand, "capture") or std.mem.eql(u8, subcommand, "cap")) {
-        try handleDiagnoseCapture(allocator, args[1..]);
+        try handleDiagnoseCapture(allocator, io, args[1..]);
     } else {
         try stdout.print("Unknown diagnose subcommand: {s}\n", .{subcommand});
         try stdout.print("Available: ping, trace, capture\n", .{});
     }
 }
 
-fn handleDiagnosePing(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn handleDiagnosePing(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
 
@@ -4206,9 +4211,9 @@ fn handleDiagnosePing(allocator: std.mem.Allocator, args: []const []const u8) !v
     try result.format(stdout);
 }
 
-fn handleDiagnoseTrace(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn handleDiagnoseTrace(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
 
@@ -4256,9 +4261,9 @@ fn handleDiagnoseTrace(allocator: std.mem.Allocator, args: []const []const u8) !
     try result.format(stdout);
 }
 
-fn handleDiagnoseCapture(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn handleDiagnoseCapture(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
 
@@ -4328,9 +4333,9 @@ fn handleDiagnoseCapture(allocator: std.mem.Allocator, args: []const []const u8)
     try capture_stats.format(stdout);
 }
 
-fn handlePathTrace(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn handlePathTrace(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
 
@@ -4370,9 +4375,9 @@ fn handlePathTrace(allocator: std.mem.Allocator, args: []const []const u8) !void
     try trace.format(stdout);
 }
 
-fn handleProbe(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn handleProbe(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
 
@@ -4457,9 +4462,9 @@ fn handleProbe(allocator: std.mem.Allocator, args: []const []const u8) !void {
     try result.format(stdout);
 }
 
-fn handleValidate(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn handleValidate(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
 
@@ -4599,9 +4604,9 @@ fn handleValidate(allocator: std.mem.Allocator, args: []const []const u8) !void 
     try stdout.print("Available: config, vlan, path, service\n", .{});
 }
 
-fn handleWatch(allocator: std.mem.Allocator, args: []const []const u8) !void {
+fn handleWatch(allocator: std.mem.Allocator, io: std.Io, args: []const []const u8) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
 
@@ -4714,9 +4719,9 @@ fn handleWatch(allocator: std.mem.Allocator, args: []const []const u8) !void {
     try watch_stats.format(stdout);
 }
 
-fn handleInterfaceStats(allocator: std.mem.Allocator, iface_name: []const u8) !void {
+fn handleInterfaceStats(allocator: std.mem.Allocator, io: std.Io, iface_name: []const u8) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
 
@@ -4733,18 +4738,18 @@ fn handleInterfaceStats(allocator: std.mem.Allocator, iface_name: []const u8) !v
     }
 }
 
-fn printVersion() !void {
+fn printVersion(io: std.Io) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
     try stdout.print("wire {s}\n", .{version});
     try stdout.print("Low-level, declarative, continuously-supervised network configuration for Linux\n", .{});
 }
 
-fn printUsage() !void {
+fn printUsage(io: std.Io) !void {
     var stdout_buf: [4096]u8 = undefined;
-        var stdout_w = std.fs.File.stdout().writerStreaming(&stdout_buf);
+        var stdout_w = std.Io.File.stdout().writerStreaming(io, &stdout_buf);
         const stdout = &stdout_w.interface;
         defer stdout.flush() catch {};
     try stdout.print(

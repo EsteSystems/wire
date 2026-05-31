@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("../compat.zig");
 const types = @import("types.zig");
 const parser = @import("../syntax/parser.zig");
 const loader = @import("../config/loader.zig");
@@ -12,7 +13,7 @@ pub fn buildDesiredState(commands: []const parser.Command, allocator: std.mem.Al
         try processCommand(&state, &cmd);
     }
 
-    state.timestamp = std.time.timestamp();
+    state.timestamp = compat.timestamp();
     return state;
 }
 

@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("../compat.zig");
 const state_types = @import("../state/types.zig");
 const state_exporter = @import("../state/exporter.zig");
 const state_desired = @import("../state/desired.zig");
@@ -57,9 +58,9 @@ pub const SnapshotManager = struct {
     /// Ensure snapshot directory exists (creates parent dirs too)
     pub fn ensureDir(self: *Self) !void {
         // Open root as base for makePath
-        var root = std.fs.openDirAbsolute("/", .{}) catch {
+        var root = compat.openDirAbsolute("/", .{}) catch {
             // Fallback: try makeDirAbsolute
-            std.fs.makeDirAbsolute(self.snapshot_dir) catch |err| {
+            compat.makeDirAbsolute(self.snapshot_dir) catch |err| {
                 if (err != error.PathAlreadyExists) {
                     return err;
                 }
@@ -85,7 +86,7 @@ pub const SnapshotManager = struct {
     pub fn createSnapshot(self: *Self, state: *const state_types.NetworkState) !Snapshot {
         try self.ensureDir();
 
-        const timestamp = std.time.timestamp();
+        const timestamp = compat.timestamp();
 
         // Generate filename: snapshot_<timestamp>.conf
         var filename_buf: [64]u8 = undefined;
@@ -106,7 +107,7 @@ pub const SnapshotManager = struct {
         try exporter.exportToFile(state, path);
 
         // Get file size
-        const file = try std.fs.openFileAbsolute(path, .{});
+        const file = try compat.openFileAbsolute(path, .{});
         defer file.close();
         const stat = try file.stat();
 
@@ -131,7 +132,7 @@ pub const SnapshotManager = struct {
         const path = std.fmt.bufPrint(&path_buf, "{s}/snapshot_{d}.conf", .{ self.snapshot_dir, timestamp }) catch unreachable;
 
         // Read file
-        const file = std.fs.openFileAbsolute(path, .{}) catch {
+        const file = compat.openFileAbsolute(path, .{}) catch {
             return error.SnapshotNotFound;
         };
         defer file.close();
@@ -164,7 +165,7 @@ pub const SnapshotManager = struct {
         var snapshots = std.array_list.Managed(SnapshotInfo).init(self.allocator);
         errdefer snapshots.deinit();
 
-        var dir = std.fs.openDirAbsolute(self.snapshot_dir, .{ .iterate = true }) catch {
+        var dir = compat.openDirAbsolute(self.snapshot_dir, .{ .iterate = true }) catch {
             return snapshots.toOwnedSlice();
         };
         defer dir.close();
@@ -242,7 +243,7 @@ pub const SnapshotManager = struct {
             var path_buf: [256]u8 = undefined;
             const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ self.snapshot_dir, snap.getFilename() }) catch continue;
 
-            std.fs.deleteFileAbsolute(path) catch continue;
+            compat.deleteFileAbsolute(path) catch continue;
             removed += 1;
         }
 

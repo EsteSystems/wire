@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("../compat.zig");
 const socket = @import("socket.zig");
 const linux = std.os.linux;
 
@@ -211,7 +212,7 @@ pub const EventMonitor = struct {
     /// Parse a netlink message and return an event if relevant
     fn parseMessage(self: *Self, hdr: *const socket.NlMsgHdr, data: []const u8) ?NetworkEvent {
         _ = self;
-        const timestamp = std.time.timestamp();
+        const timestamp = compat.timestamp();
 
         switch (hdr.type) {
             socket.RTM.NEWLINK => return parseLinkEvent(data, true, timestamp),

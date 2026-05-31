@@ -26,7 +26,7 @@ pub fn createBridge(name: []const u8) !void {
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -58,7 +58,7 @@ pub fn deleteBridge(name: []const u8) !void {
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -84,7 +84,7 @@ pub fn deleteBridge(name: []const u8) !void {
 
 /// Add a member interface to a bridge
 pub fn addBridgeMember(bridge_name: []const u8, member_name: []const u8) !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -124,7 +124,7 @@ pub fn addBridgeMember(bridge_name: []const u8, member_name: []const u8) !void {
 
 /// Remove a member interface from a bridge
 pub fn removeBridgeMember(member_name: []const u8) !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -157,7 +157,7 @@ pub fn removeBridgeMember(member_name: []const u8) !void {
 
 /// Set bridge STP state
 pub fn setBridgeStp(name: []const u8, enabled: bool) !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -513,7 +513,7 @@ pub const BRIDGE_VLAN_INFO_FLAGS = struct {
 
 /// Enable or disable VLAN filtering on a bridge
 pub fn setBridgeVlanFiltering(name: []const u8, enabled: bool) !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -558,7 +558,7 @@ pub fn setBridgeVlanFiltering(name: []const u8, enabled: bool) !void {
 /// Add a VLAN entry to a bridge port
 /// flags: combination of BRIDGE_VLAN_INFO_FLAGS (PVID, UNTAGGED, MASTER)
 pub fn addBridgeVlanEntry(port_name: []const u8, vid: u16, flags: u16) !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -599,7 +599,7 @@ pub fn addBridgeVlanEntry(port_name: []const u8, vid: u16, flags: u16) !void {
 
 /// Add a static FDB entry to a bridge
 pub fn addFdbEntry(port_name: []const u8, mac: [6]u8, vlan_id: ?u16) !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -638,7 +638,7 @@ pub fn addFdbEntry(port_name: []const u8, mac: [6]u8, vlan_id: ?u16) !void {
 
 /// Remove an FDB entry from a bridge
 pub fn removeFdbEntry(port_name: []const u8, mac: [6]u8, vlan_id: ?u16) !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

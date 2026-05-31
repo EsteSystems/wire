@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("../compat.zig");
 
 /// Unified state types for network configuration
 /// These types represent both desired and live state
@@ -184,7 +185,7 @@ pub const NetworkState = struct {
             .bridges = std.array_list.Managed(BridgeState).init(allocator),
             .vlans = std.array_list.Managed(VlanState).init(allocator),
             .veths = std.array_list.Managed(VethState).init(allocator),
-            .timestamp = std.time.timestamp(),
+            .timestamp = compat.timestamp(),
         };
     }
 

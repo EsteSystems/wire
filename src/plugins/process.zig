@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("../../compat.zig");
 const linux = std.os.linux;
 
 /// Result of a process execution
@@ -132,11 +133,11 @@ pub fn programExists(program: []const u8) bool {
 
     var path_iter = std.mem.splitScalar(u8, path_env, ':');
     while (path_iter.next()) |dir| {
-        var buf: [std.fs.max_path_bytes]u8 = undefined;
+        var buf: [compat.max_path_bytes]u8 = undefined;
         const full_path = std.fmt.bufPrint(&buf, "{s}/{s}", .{ dir, program }) catch continue;
 
         // Check if file exists and is executable
-        const stat = std.fs.cwd().statFile(full_path) catch continue;
+        const stat = compat.cwd().statFile(compat.globalIo(), full_path) catch continue;
         if (stat.kind == .file) {
             // Check if executable (any execute bit set)
             if (stat.mode & 0o111 != 0) {
@@ -169,10 +170,10 @@ pub fn findProgram(allocator: std.mem.Allocator, program: []const u8) !?[]const 
 
     var path_iter = std.mem.splitScalar(u8, path_env, ':');
     while (path_iter.next()) |dir| {
-        var buf: [std.fs.max_path_bytes]u8 = undefined;
+        var buf: [compat.max_path_bytes]u8 = undefined;
         const full_path = std.fmt.bufPrint(&buf, "{s}/{s}", .{ dir, program }) catch continue;
 
-        const stat = std.fs.cwd().statFile(full_path) catch continue;
+        const stat = compat.cwd().statFile(compat.globalIo(), full_path) catch continue;
         if (stat.kind == .file and (stat.mode & 0o111 != 0)) {
             return try allocator.dupe(u8, full_path);
         }

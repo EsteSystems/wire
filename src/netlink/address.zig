@@ -162,7 +162,7 @@ pub fn addAddress(if_index: u32, family: u8, addr_bytes: []const u8, prefixlen: 
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -190,7 +190,7 @@ pub fn deleteAddress(if_index: u32, family: u8, addr_bytes: []const u8, prefixle
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

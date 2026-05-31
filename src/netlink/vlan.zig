@@ -23,7 +23,7 @@ pub const Vlan = struct {
 /// Create a VLAN interface
 /// Creates interface named <parent>.<vlan_id> (e.g., eth0.100)
 pub fn createVlan(parent_name: []const u8, vlan_id: u16) !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -78,7 +78,7 @@ pub fn createVlan(parent_name: []const u8, vlan_id: u16) !void {
 
 /// Create a VLAN interface with custom name
 pub fn createVlanWithName(parent_name: []const u8, vlan_id: u16, vlan_name: []const u8) !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -130,7 +130,7 @@ pub fn deleteVlan(name: []const u8) !void {
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

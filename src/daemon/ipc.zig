@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("../compat.zig");
 const linux = std.os.linux;
 const supervisor = @import("supervisor.zig");
 const state_types = @import("../state/types.zig");
@@ -71,7 +72,7 @@ pub const IpcServer = struct {
     /// Start the IPC server
     pub fn start(self: *Self) !void {
         // Remove existing socket file
-        std.fs.cwd().deleteFile(self.socket_path) catch {};
+        compat.cwd().deleteFile(compat.globalIo(), self.socket_path) catch {};
 
         // Create Unix domain socket
         const fd = linux.socket(linux.AF.UNIX, linux.SOCK.STREAM | linux.SOCK.NONBLOCK | linux.SOCK.CLOEXEC, 0);
@@ -111,7 +112,7 @@ pub const IpcServer = struct {
             _ = linux.close(@intCast(fd));
             self.socket_fd = null;
         }
-        std.fs.cwd().deleteFile(self.socket_path) catch {};
+        compat.cwd().deleteFile(compat.globalIo(), self.socket_path) catch {};
     }
 
     /// Poll for incoming connections (non-blocking)

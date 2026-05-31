@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("../compat.zig");
 const probe = @import("probe.zig");
 const validate = @import("validate.zig");
 const netlink_interface = @import("../netlink/interface.zig");
@@ -29,7 +30,7 @@ pub const WatchStats = struct {
 
     pub fn init() WatchStats {
         return .{
-            .start_time = std.time.milliTimestamp(),
+            .start_time = compat.milliTimestamp(),
         };
     }
 
@@ -64,7 +65,7 @@ pub const WatchStats = struct {
     }
 
     pub fn elapsedSecs(self: *const WatchStats) f64 {
-        const now = std.time.milliTimestamp();
+        const now = compat.milliTimestamp();
         return @as(f64, @floatFromInt(now - self.start_time)) / 1000.0;
     }
 
@@ -151,7 +152,7 @@ pub const WatchEvent = struct {
 pub fn watch(config: WatchConfig, writer: anytype) !WatchStats {
     var stats = WatchStats.init();
     var was_up = true;
-    const base_time = std.time.milliTimestamp();
+    const base_time = compat.milliTimestamp();
 
     try writer.print("Watching {s}:{d} (interval={d}ms, timeout={d}ms)\n", .{
         config.target,
@@ -172,7 +173,7 @@ pub fn watch(config: WatchConfig, writer: anytype) !WatchStats {
         stats.recordProbe(&result);
 
         var event = WatchEvent{
-            .timestamp = std.time.milliTimestamp() - base_time,
+            .timestamp = compat.milliTimestamp() - base_time,
             .probe_result = result,
             .alert = null,
         };

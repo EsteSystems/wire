@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("../compat.zig");
 const state_types = @import("../state/types.zig");
 
 /// Connectivity check result
@@ -90,12 +91,13 @@ pub const ConnectivityAnalyzer = struct {
             if (route.dst_len == 0 and route.route_type == 1 and route.family == 2) {
                 has_default = true;
                 if (route.has_gateway) {
-                    gateway_len = (std.fmt.bufPrint(&gateway_str, "{d}.{d}.{d}.{d}", .{
+                    const gw_result = std.fmt.bufPrint(&gateway_str, "{d}.{d}.{d}.{d}", .{
                         route.gateway[0],
                         route.gateway[1],
                         route.gateway[2],
                         route.gateway[3],
-                    }) catch "?").len;
+                    }) catch "?";
+                    gateway_len = gw_result.len;
                 }
                 break;
             }
@@ -110,20 +112,23 @@ pub const ConnectivityAnalyzer = struct {
 
     /// Check DNS configuration
     fn checkDnsConfig(self: *Self) !void {
-        const file = std.fs.openFileAbsolute("/etc/resolv.conf", .{}) catch {
+        const file = compat.openFileAbsolute("/etc/resolv.conf", .{}) catch {
             try self.addResult(.warning, "Could not read /etc/resolv.conf", "DNS resolution may not work");
             return;
         };
-        defer file.close();
+        defer file.close(compat.globalIo());
 
+        var rb: [4096]u8 = undefined;
+        var reader = file.reader(compat.globalIo(), &rb);
         var buf: [4096]u8 = undefined;
-        const content = file.readAll(&buf) catch {
+        const bytes_read = reader.interface.readSliceShort(&buf) catch {
             try self.addResult(.warning, "Could not read /etc/resolv.conf", null);
             return;
         };
+        const content = buf[0..bytes_read];
 
         var nameserver_count: usize = 0;
-        var lines = std.mem.splitScalar(u8, buf[0..content], '\n');
+        var lines = std.mem.splitScalar(u8, content, '\n');
         while (lines.next()) |line| {
             if (std.mem.startsWith(u8, line, "nameserver")) {
                 nameserver_count += 1;

@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("../../compat.zig");
 const posix = std.posix;
 const linux = std.os.linux;
 
@@ -124,7 +125,7 @@ pub const Tracer = struct {
                         posix.SOCK.DGRAM | posix.SOCK.CLOEXEC,
                         posix.IPPROTO.ICMP,
                     ),
-                    .identifier = @truncate(@as(u64, @bitCast(std.time.timestamp())) ^ 0xABCD),
+                    .identifier = @truncate(@as(u64, @bitCast(compat.timestamp())) ^ 0xABCD),
                     .sequence = 0,
                 };
             }
@@ -134,7 +135,7 @@ pub const Tracer = struct {
         return Self{
             .allocator = allocator,
             .socket = sock,
-            .identifier = @truncate(@as(u64, @bitCast(std.time.timestamp())) ^ 0xABCD),
+            .identifier = @truncate(@as(u64, @bitCast(compat.timestamp())) ^ 0xABCD),
             .sequence = 0,
         };
     }
@@ -194,7 +195,7 @@ pub const Tracer = struct {
         packet[7] = @truncate(seq);
 
         // Payload with timestamp
-        const timestamp = std.time.microTimestamp();
+        const timestamp = compat.microTimestamp();
         const ts_bytes: [8]u8 = @bitCast(timestamp);
         @memcpy(packet[8..16], &ts_bytes);
 
@@ -219,7 +220,7 @@ pub const Tracer = struct {
         };
 
         // Send
-        const send_time = std.time.microTimestamp();
+        const send_time = compat.microTimestamp();
         _ = posix.sendto(
             self.socket,
             packet[0..total_size],
@@ -245,7 +246,7 @@ pub const Tracer = struct {
         );
 
         if (recv_result) |bytes_received| {
-            const recv_time = std.time.microTimestamp();
+            const recv_time = compat.microTimestamp();
             const rtt = @as(u64, @intCast(recv_time - send_time));
 
             if (bytes_received < 28) {

@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("../compat.zig");
 const types = @import("types.zig");
 const netlink_interface = @import("../netlink/interface.zig");
 const netlink_address = @import("../netlink/address.zig");
@@ -19,7 +20,7 @@ pub fn queryLiveState(allocator: std.mem.Allocator) !types.NetworkState {
     try queryRoutes(&state);
 
     // Update timestamp
-    state.timestamp = std.time.timestamp();
+    state.timestamp = compat.timestamp();
 
     return state;
 }
@@ -223,7 +224,7 @@ pub fn refreshState(state: *types.NetworkState, target: RefreshTarget) !void {
             try queryRoutes(state);
         },
     }
-    state.timestamp = std.time.timestamp();
+    state.timestamp = compat.timestamp();
 }
 
 // Tests

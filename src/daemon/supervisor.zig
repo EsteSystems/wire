@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("../compat.zig");
 const linux = std.os.linux;
 const netlink_events = @import("../netlink/events.zig");
 const state_types = @import("../state/types.zig");
@@ -110,7 +111,7 @@ pub const Supervisor = struct {
         }
 
         self.state = .starting;
-        self.start_time = std.time.timestamp();
+        self.start_time = compat.timestamp();
         self.pid = linux.getpid();
 
         // Write PID file
@@ -127,7 +128,9 @@ pub const Supervisor = struct {
         self.ipc_server = ipc.IpcServer.init(self.allocator, self.config.socket_path);
         if (self.ipc_server) |*server| {
             server.start() catch |err| {
-                const stdout = std.fs.File.stdout().deprecatedWriter();
+                var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.Io.File.stdout().writerStreaming(compat.globalIo(), &stdout_buf);
+        const stdout = &stdout_w.interface;
                 stdout.print("Warning: Failed to start IPC server: {}\n", .{err}) catch {};
                 self.ipc_server = null;
             };
@@ -136,12 +139,16 @@ pub const Supervisor = struct {
         // Create config file watcher
         if (self.config.watch_config) {
             self.config_watcher = watcher.ConfigWatcher.init(self.allocator, self.config.config_path) catch |err| blk: {
-                const stdout = std.fs.File.stdout().deprecatedWriter();
+                var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.Io.File.stdout().writerStreaming(compat.globalIo(), &stdout_buf);
+        const stdout = &stdout_w.interface;
                 stdout.print("Warning: Failed to start config watcher: {}\n", .{err}) catch {};
                 break :blk null;
             };
             if (self.config_watcher != null) {
-                const stdout = std.fs.File.stdout().deprecatedWriter();
+                var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.Io.File.stdout().writerStreaming(compat.globalIo(), &stdout_buf);
+        const stdout = &stdout_w.interface;
                 stdout.print("Watching config file for changes: {s}\n", .{self.config.config_path}) catch {};
             }
         }
@@ -162,10 +169,12 @@ pub const Supervisor = struct {
 
     /// Main event loop
     fn runLoop(self: *Self) !void {
-        const stdout = std.fs.File.stdout().deprecatedWriter();
+        var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.Io.File.stdout().writerStreaming(compat.globalIo(), &stdout_buf);
+        const stdout = &stdout_w.interface;
         try stdout.print("wire daemon started (pid: {d})\n", .{self.pid});
 
-        var last_reconcile = std.time.timestamp();
+        var last_reconcile = compat.timestamp();
 
         while (!self.should_stop) {
             // Check for reload request
@@ -208,7 +217,7 @@ pub const Supervisor = struct {
             }
 
             // Periodic reconciliation
-            const now = std.time.timestamp();
+            const now = compat.timestamp();
             if (self.config.reconcile_interval > 0 and
                 now - last_reconcile >= self.config.reconcile_interval)
             {
@@ -222,7 +231,9 @@ pub const Supervisor = struct {
 
     /// Perform reconciliation
     fn reconcile(self: *Self) !void {
-        const stdout = std.fs.File.stdout().deprecatedWriter();
+        var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.Io.File.stdout().writerStreaming(compat.globalIo(), &stdout_buf);
+        const stdout = &stdout_w.interface;
 
         if (self.desired_state == null) {
             return;
@@ -272,12 +283,14 @@ pub const Supervisor = struct {
         }
 
         self.reconcile_count += 1;
-        self.last_reconcile = std.time.timestamp();
+        self.last_reconcile = compat.timestamp();
     }
 
     /// Create initial snapshot at daemon start
     fn createInitialSnapshot(self: *Self) !void {
-        const stdout = std.fs.File.stdout().deprecatedWriter();
+        var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.Io.File.stdout().writerStreaming(compat.globalIo(), &stdout_buf);
+        const stdout = &stdout_w.interface;
 
         // Query live state
         var live = state_live.queryLiveState(self.allocator) catch |err| {
@@ -305,7 +318,7 @@ pub const Supervisor = struct {
 
     /// Create a snapshot if enough time has passed
     fn maybeCreateSnapshot(self: *Self) void {
-        const now = std.time.timestamp();
+        const now = compat.timestamp();
         if (now - self.last_snapshot < snapshot_interval) {
             return;
         }
@@ -319,7 +332,9 @@ pub const Supervisor = struct {
         self.last_snapshot = snapshot.timestamp;
 
         if (self.config.verbose) {
-            const stdout = std.fs.File.stdout().deprecatedWriter();
+            var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.Io.File.stdout().writerStreaming(compat.globalIo(), &stdout_buf);
+        const stdout = &stdout_w.interface;
             stdout.print("Created snapshot at {d}\n", .{snapshot.timestamp}) catch {};
         }
     }
@@ -364,7 +379,7 @@ pub const Supervisor = struct {
 
     /// Write PID file
     fn writePidFile(self: *Self) !void {
-        const file = std.fs.cwd().createFile(self.config.pid_file, .{}) catch |err| {
+        const file = compat.cwd().createFile(compat.globalIo(), self.config.pid_file, .{}) catch |err| {
             switch (err) {
                 error.AccessDenied => return error.PermissionDenied,
                 else => return err,
@@ -379,7 +394,7 @@ pub const Supervisor = struct {
 
     /// Remove PID file
     fn removePidFile(self: *Self) void {
-        std.fs.cwd().deleteFile(self.config.pid_file) catch {};
+        compat.cwd().deleteFile(compat.globalIo(), self.config.pid_file) catch {};
     }
 
     /// Get daemon status
@@ -387,7 +402,7 @@ pub const Supervisor = struct {
         return DaemonStatus{
             .state = self.state,
             .pid = self.pid,
-            .uptime = if (self.start_time > 0) std.time.timestamp() - self.start_time else 0,
+            .uptime = if (self.start_time > 0) compat.timestamp() - self.start_time else 0,
             .reconcile_count = self.reconcile_count,
             .event_count = self.event_count,
             .last_reconcile = self.last_reconcile,
@@ -409,7 +424,7 @@ pub const DaemonStatus = struct {
 
 /// Read PID from PID file
 pub fn readPidFile(path: []const u8) !linux.pid_t {
-    const file = std.fs.cwd().openFile(path, .{}) catch |err| {
+    const file = compat.cwd().openFile(compat.globalIo(), path, .{}) catch |err| {
         switch (err) {
             error.FileNotFound => return error.NotRunning,
             else => return err,

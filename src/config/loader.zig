@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("../compat.zig");
 const parser = @import("../syntax/parser.zig");
 const semantic = @import("../syntax/semantic.zig");
 const executor = @import("../syntax/executor.zig");
@@ -79,12 +80,14 @@ pub const ConfigLoader = struct {
 
     /// Load configuration from a file
     pub fn loadFile(self: *Self, path: []const u8) ConfigError!LoadedConfig {
-        const file = std.fs.cwd().openFile(path, .{}) catch {
+        const file = compat.cwd().openFile(compat.globalIo(), path, .{}) catch {
             return ConfigError.FileNotFound;
         };
-        defer file.close();
+        defer file.close(compat.globalIo());
 
-        const content = file.readToEndAlloc(self.allocator, 1024 * 1024) catch {
+        var reader_buf: [4096]u8 = undefined;
+        var reader = file.reader(compat.globalIo(), &reader_buf);
+        const content = reader.interface.readAlloc(self.allocator, 1024 * 1024) catch {
             return ConfigError.ReadError;
         };
         errdefer self.allocator.free(content);
@@ -185,7 +188,9 @@ pub const ValidationReport = struct {
 
 /// Apply configuration from a file
 pub fn applyConfig(path: []const u8, allocator: std.mem.Allocator, options: ApplyOptions) !ApplyResult {
-    const stdout = std.fs.File.stdout().deprecatedWriter();
+    var stdout_buf: [4096]u8 = undefined;
+        var stdout_w = std.Io.File.stdout().writerStreaming(compat.globalIo(), &stdout_buf);
+        const stdout = &stdout_w.interface;
 
     var loader = ConfigLoader.init(allocator);
     defer loader.deinit();
@@ -343,7 +348,7 @@ pub fn applyConfig(path: []const u8, allocator: std.mem.Allocator, options: Appl
         try stdout.print("OK\n", .{});
 
         // Show command preview
-        var confirm_sys = confirmation.ConfirmationSystem.init(allocator, options.skip_confirmation);
+        var confirm_sys = confirmation.ConfirmationSystem.init(allocator, compat.globalIo(), options.skip_confirmation);
         try confirm_sys.showCommandPreview(loaded.commands);
 
         // Prompt for confirmation
@@ -368,7 +373,7 @@ pub fn applyConfig(path: []const u8, allocator: std.mem.Allocator, options: Appl
 
         // Apply commands
         try stdout.print("\nApplying configuration...\n", .{});
-        var exec = executor.Executor.init(allocator);
+        var exec = executor.Executor.init(allocator, compat.globalIo());
         var applied: usize = 0;
         var failed: usize = 0;
 
@@ -421,7 +426,7 @@ pub fn applyConfig(path: []const u8, allocator: std.mem.Allocator, options: Appl
     try stdout.print("OK\n", .{});
 
     // Show command preview
-    var confirm_sys = confirmation.ConfirmationSystem.init(allocator, options.skip_confirmation);
+    var confirm_sys = confirmation.ConfirmationSystem.init(allocator, compat.globalIo(), options.skip_confirmation);
     try confirm_sys.showCommandPreview(loaded.commands);
 
     // Prompt for confirmation
@@ -446,7 +451,7 @@ pub fn applyConfig(path: []const u8, allocator: std.mem.Allocator, options: Appl
 
     // Apply commands in resolved order
     try stdout.print("\nApplying configuration...\n", .{});
-    var exec = executor.Executor.init(allocator);
+    var exec = executor.Executor.init(allocator, compat.globalIo());
     var applied: usize = 0;
     var failed: usize = 0;
 

@@ -260,7 +260,7 @@ pub fn getInterfaceByName(allocator: std.mem.Allocator, name: []const u8) !?Inte
 /// Set interface up or down
 pub fn setInterfaceState(name: []const u8, up: bool) !void {
     // First get the interface to get its index
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -292,7 +292,7 @@ pub fn setInterfaceState(name: []const u8, up: bool) !void {
 
 /// Set interface MTU
 pub fn setInterfaceMtu(name: []const u8, mtu: u32) !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
