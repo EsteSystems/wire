@@ -237,3 +237,89 @@ pub fn parseIPv4(str: []const u8) !struct { addr: [4]u8, prefix: u8 } {
 
     return .{ .addr = addr, .prefix = prefix };
 }
+
+// Tests
+
+test "Address.isIPv4" {
+    var addr = Address{
+        .family = @intCast(linux.AF.INET),
+        .prefixlen = 24,
+        .scope = 0,
+        .index = 1,
+        .address = [_]u8{ 10, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        .local = [_]u8{0} ** 16,
+        .label = [_]u8{0} ** 16,
+        .label_len = 0,
+    };
+    try std.testing.expect(addr.isIPv4());
+    try std.testing.expect(!addr.isIPv6());
+}
+
+test "Address.isIPv6" {
+    var addr = Address{
+        .family = @intCast(linux.AF.INET6),
+        .prefixlen = 64,
+        .scope = 0,
+        .index = 1,
+        .address = [_]u8{ 0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+        .local = [_]u8{0} ** 16,
+        .label = [_]u8{0} ** 16,
+        .label_len = 0,
+    };
+    try std.testing.expect(addr.isIPv6());
+    try std.testing.expect(!addr.isIPv4());
+}
+
+test "Address.formatAddress IPv4" {
+    var addr = Address{
+        .family = @intCast(linux.AF.INET),
+        .prefixlen = 24,
+        .scope = 0,
+        .index = 1,
+        .address = [_]u8{ 192, 168, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        .local = [_]u8{0} ** 16,
+        .label = [_]u8{0} ** 16,
+        .label_len = 0,
+    };
+    var buf: [64]u8 = undefined;
+    const result = try addr.formatAddress(&buf);
+    try std.testing.expectEqualStrings("192.168.1.1/24", result);
+}
+
+test "Address.scopeString" {
+    var addr = Address{
+        .family = @intCast(linux.AF.INET),
+        .prefixlen = 24,
+        .scope = 253,
+        .index = 1,
+        .address = [_]u8{0} ** 16,
+        .local = [_]u8{0} ** 16,
+        .label = [_]u8{0} ** 16,
+        .label_len = 0,
+    };
+    try std.testing.expectEqualStrings("link", addr.scopeString());
+    addr.scope = 0;
+    try std.testing.expectEqualStrings("global", addr.scopeString());
+    addr.scope = 99;
+    try std.testing.expectEqualStrings("unknown", addr.scopeString());
+}
+
+test "parseIPv4 basic" {
+    const result = try parseIPv4("10.0.0.1/8");
+    try std.testing.expectEqual(@as(u8, 10), result.addr[0]);
+    try std.testing.expectEqual(@as(u8, 0), result.addr[1]);
+    try std.testing.expectEqual(@as(u8, 0), result.addr[2]);
+    try std.testing.expectEqual(@as(u8, 1), result.addr[3]);
+    try std.testing.expectEqual(@as(u8, 8), result.prefix);
+}
+
+test "parseIPv4 default prefix" {
+    const result = try parseIPv4("192.168.1.1");
+    try std.testing.expectEqual(@as(u8, 32), result.prefix);
+}
+
+test "parseIPv4 invalid" {
+    try std.testing.expectError(error.InvalidAddress, parseIPv4("256.1.1.1"));
+    try std.testing.expectError(error.InvalidAddress, parseIPv4("1.1.1"));
+    try std.testing.expectError(error.InvalidPrefix, parseIPv4("1.1.1.1/abc"));
+}

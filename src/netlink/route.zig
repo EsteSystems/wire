@@ -335,3 +335,145 @@ pub fn deleteRoute(family: u8, dst: ?[]const u8, dst_len: u8) !void {
     const response = try nl.request(msg, allocator);
     allocator.free(response);
 }
+
+// Tests
+
+test "Route.isDefault" {
+    var route = Route{
+        .family = @intCast(linux.AF.INET),
+        .dst_len = 0,
+        .src_len = 0,
+        .table = 0,
+        .protocol = 4,
+        .scope = 0,
+        .route_type = socket.RTN.UNICAST,
+        .dst = [_]u8{0} ** 16,
+        .gateway = [_]u8{0} ** 16,
+        .oif = 0,
+        .priority = 0,
+        .has_gateway = false,
+    };
+    try std.testing.expect(route.isDefault());
+    route.dst_len = 24;
+    try std.testing.expect(!route.isDefault());
+}
+
+test "Route.formatDst v4" {
+    var route = Route{
+        .family = @intCast(linux.AF.INET),
+        .dst_len = 24,
+        .src_len = 0,
+        .table = 0,
+        .protocol = 4,
+        .scope = 0,
+        .route_type = socket.RTN.UNICAST,
+        .dst = [_]u8{ 10, 0, 0, 0 } ++ [_]u8{0} ** 12,
+        .gateway = [_]u8{0} ** 16,
+        .oif = 0,
+        .priority = 0,
+        .has_gateway = false,
+    };
+    var buf: [64]u8 = undefined;
+    const result = try route.formatDst(&buf);
+    try std.testing.expectEqualStrings("10.0.0.0/24", result);
+}
+
+test "Route.formatDst default" {
+    var route = Route{
+        .family = @intCast(linux.AF.INET),
+        .dst_len = 0,
+        .src_len = 0,
+        .table = 0,
+        .protocol = 4,
+        .scope = 0,
+        .route_type = socket.RTN.UNICAST,
+        .dst = [_]u8{0} ** 16,
+        .gateway = [_]u8{0} ** 16,
+        .oif = 0,
+        .priority = 0,
+        .has_gateway = false,
+    };
+    var buf: [64]u8 = undefined;
+    const result = try route.formatDst(&buf);
+    try std.testing.expectEqualStrings("default", result);
+}
+
+test "Route.formatGateway v4" {
+    var route = Route{
+        .family = @intCast(linux.AF.INET),
+        .dst_len = 0,
+        .src_len = 0,
+        .table = 0,
+        .protocol = 4,
+        .scope = 0,
+        .route_type = socket.RTN.UNICAST,
+        .dst = [_]u8{0} ** 16,
+        .gateway = [_]u8{ 192, 168, 1, 1 } ++ [_]u8{0} ** 12,
+        .oif = 0,
+        .priority = 0,
+        .has_gateway = true,
+    };
+    var buf: [64]u8 = undefined;
+    const result = try route.formatGateway(&buf);
+    try std.testing.expectEqualStrings("192.168.1.1", result);
+}
+
+test "Route.formatGateway none" {
+    var route = Route{
+        .family = @intCast(linux.AF.INET),
+        .dst_len = 0,
+        .src_len = 0,
+        .table = 0,
+        .protocol = 4,
+        .scope = 0,
+        .route_type = socket.RTN.UNICAST,
+        .dst = [_]u8{0} ** 16,
+        .gateway = [_]u8{0} ** 16,
+        .oif = 0,
+        .priority = 0,
+        .has_gateway = false,
+    };
+    var buf: [64]u8 = undefined;
+    const result = try route.formatGateway(&buf);
+    try std.testing.expectEqual(@as(usize, 0), result.len);
+}
+
+test "Route.typeString" {
+    var route = Route{
+        .family = @intCast(linux.AF.INET),
+        .dst_len = 0,
+        .src_len = 0,
+        .table = 0,
+        .protocol = 4,
+        .scope = 0,
+        .route_type = socket.RTN.UNICAST,
+        .dst = [_]u8{0} ** 16,
+        .gateway = [_]u8{0} ** 16,
+        .oif = 0,
+        .priority = 0,
+        .has_gateway = false,
+    };
+    try std.testing.expectEqualStrings("unicast", route.typeString());
+    route.route_type = socket.RTN.BLACKHOLE;
+    try std.testing.expectEqualStrings("blackhole", route.typeString());
+}
+
+test "Route.protocolString" {
+    var route = Route{
+        .family = @intCast(linux.AF.INET),
+        .dst_len = 0,
+        .src_len = 0,
+        .table = 0,
+        .protocol = 4,
+        .scope = 0,
+        .route_type = 0,
+        .dst = [_]u8{0} ** 16,
+        .gateway = [_]u8{0} ** 16,
+        .oif = 0,
+        .priority = 0,
+        .has_gateway = false,
+    };
+    try std.testing.expectEqualStrings("static", route.protocolString());
+    route.protocol = 2;
+    try std.testing.expectEqualStrings("kernel", route.protocolString());
+}

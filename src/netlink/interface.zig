@@ -442,3 +442,177 @@ pub fn verifyInterfaceExists(allocator: std.mem.Allocator, name: []const u8) !In
     const maybe_iface = try getInterfaceByName(allocator, name);
     return maybe_iface orelse error.VerificationFailed;
 }
+
+// Tests
+
+test "Interface.getName" {
+    var name_buf: [16]u8 = undefined;
+    @memcpy(name_buf[0..4], "eth0");
+    var iface = Interface{
+        .index = 1,
+        .name = name_buf,
+        .name_len = 4,
+        .flags = 0,
+        .mtu = 1500,
+        .mac = [_]u8{0} ** 6,
+        .has_mac = false,
+        .operstate = 6,
+        .carrier = true,
+        .master_index = null,
+        .link_index = null,
+        .link_netns_id = null,
+        .link_kind = [_]u8{0} ** 16,
+        .link_kind_len = 0,
+        .vlan_id = null,
+        .info_data = [_]u8{0} ** 256,
+        .info_data_len = 0,
+    };
+    try std.testing.expectEqualStrings("eth0", iface.getName());
+}
+
+test "Interface.isUp flags" {
+    var iface = Interface{
+        .index = 1,
+        .name = [_]u8{'e', 't', 'h', '0'} ++ [_]u8{0} ** 12,
+        .name_len = 4,
+        .flags = socket.IFF.UP | socket.IFF.RUNNING,
+        .mtu = 1500,
+        .mac = [_]u8{0} ** 6,
+        .has_mac = false,
+        .operstate = 0,
+        .carrier = false,
+        .master_index = null,
+        .link_index = null,
+        .link_netns_id = null,
+        .link_kind = [_]u8{0} ** 16,
+        .link_kind_len = 0,
+        .vlan_id = null,
+        .info_data = [_]u8{0} ** 256,
+        .info_data_len = 0,
+    };
+    try std.testing.expect(iface.isUp());
+    try std.testing.expect(iface.isRunning());
+    try std.testing.expect(!iface.isLoopback());
+}
+
+test "Interface.isLoopback" {
+    var iface = Interface{
+        .index = 1,
+        .name = [_]u8{'l', 'o'} ++ [_]u8{0} ** 14,
+        .name_len = 2,
+        .flags = socket.IFF.UP | socket.IFF.RUNNING | socket.IFF.LOOPBACK,
+        .mtu = 65536,
+        .mac = [_]u8{0} ** 6,
+        .has_mac = false,
+        .operstate = 0,
+        .carrier = true,
+        .master_index = null,
+        .link_index = null,
+        .link_netns_id = null,
+        .link_kind = [_]u8{0} ** 16,
+        .link_kind_len = 0,
+        .vlan_id = null,
+        .info_data = [_]u8{0} ** 256,
+        .info_data_len = 0,
+    };
+    try std.testing.expect(iface.isLoopback());
+}
+
+test "Interface.hasCarrier" {
+    var iface = Interface{
+        .index = 1,
+        .name = [_]u8{'e', 't', 'h', '0'} ++ [_]u8{0} ** 12,
+        .name_len = 4,
+        .flags = socket.IFF.UP | socket.IFF.LOWER_UP,
+        .mtu = 1500,
+        .mac = [_]u8{0} ** 6,
+        .has_mac = false,
+        .operstate = 0,
+        .carrier = false,
+        .master_index = null,
+        .link_index = null,
+        .link_netns_id = null,
+        .link_kind = [_]u8{0} ** 16,
+        .link_kind_len = 0,
+        .vlan_id = null,
+        .info_data = [_]u8{0} ** 256,
+        .info_data_len = 0,
+    };
+    // LOWER_UP flag indicates carrier
+    try std.testing.expect(iface.hasCarrier());
+}
+
+test "Interface.formatMac" {
+    var iface = Interface{
+        .index = 1,
+        .name = [_]u8{'e', 't', 'h', '0'} ++ [_]u8{0} ** 12,
+        .name_len = 4,
+        .flags = 0,
+        .mtu = 1500,
+        .mac = [_]u8{ 0x00, 0x11, 0x22, 0x33, 0x44, 0x55 },
+        .has_mac = true,
+        .operstate = 0,
+        .carrier = false,
+        .master_index = null,
+        .link_index = null,
+        .link_netns_id = null,
+        .link_kind = [_]u8{0} ** 16,
+        .link_kind_len = 0,
+        .vlan_id = null,
+        .info_data = [_]u8{0} ** 256,
+        .info_data_len = 0,
+    };
+    const mac_str = iface.formatMac();
+    try std.testing.expectEqualStrings("00:11:22:33:44:55", &mac_str);
+}
+
+test "Interface.operstateString" {
+    var iface = Interface{
+        .index = 1,
+        .name = [_]u8{'e', 't', 'h', '0'} ++ [_]u8{0} ** 12,
+        .name_len = 4,
+        .flags = 0,
+        .mtu = 1500,
+        .mac = [_]u8{0} ** 6,
+        .has_mac = false,
+        .operstate = 6, // IF_OPER_UP
+        .carrier = false,
+        .master_index = null,
+        .link_index = null,
+        .link_netns_id = null,
+        .link_kind = [_]u8{0} ** 16,
+        .link_kind_len = 0,
+        .vlan_id = null,
+        .info_data = [_]u8{0} ** 256,
+        .info_data_len = 0,
+    };
+    try std.testing.expectEqualStrings("up", iface.operstateString());
+    iface.operstate = 2;
+    try std.testing.expectEqualStrings("down", iface.operstateString());
+    iface.operstate = 99;
+    try std.testing.expectEqualStrings("unknown", iface.operstateString());
+}
+
+test "Interface.isVeth" {
+    var iface = Interface{
+        .index = 1,
+        .name = [_]u8{'v', 'e', 't', 'h', '0'} ++ [_]u8{0} ** 11,
+        .name_len = 5,
+        .flags = 0,
+        .mtu = 1500,
+        .mac = [_]u8{0} ** 6,
+        .has_mac = false,
+        .operstate = 0,
+        .carrier = false,
+        .master_index = null,
+        .link_index = null,
+        .link_netns_id = null,
+        .link_kind = undefined,
+        .link_kind_len = 4,
+        .vlan_id = null,
+        .info_data = [_]u8{0} ** 256,
+        .info_data_len = 0,
+    };
+    @memcpy(iface.link_kind[0..4], "veth");
+    try std.testing.expect(iface.isVeth());
+}
