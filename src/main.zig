@@ -7,7 +7,10 @@ pub fn main(init: std.process.Init) !void {
     // Collect command-line args
     var args_iter = std.process.Args.Iterator.init(init.minimal.args);
     var args_list = std.array_list.Managed([]const u8).init(allocator);
-    defer args_list.deinit();
+    defer {
+        for (args_list.items) |arg| allocator.free(arg);
+        args_list.deinit();
+    }
     while (args_iter.next()) |arg| {
         try args_list.append(try allocator.dupe(u8, arg));
     }
