@@ -158,7 +158,7 @@ pub fn createVxlan(name: []const u8, options: VxlanOptions) !void {
     const allocator = gpa.allocator();
 
     // Build the message
-    var buf: [512]u8 = undefined;
+    var buf: [512]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.NEWLINK, socket.NLM_F.REQUEST | socket.NLM_F.CREATE | socket.NLM_F.EXCL | socket.NLM_F.ACK);
@@ -220,7 +220,7 @@ pub fn createGre(name: []const u8, options: GreOptions) !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [512]u8 = undefined;
+    var buf: [512]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.NEWLINK, socket.NLM_F.REQUEST | socket.NLM_F.CREATE | socket.NLM_F.EXCL | socket.NLM_F.ACK);
@@ -277,7 +277,7 @@ pub fn createGretap(name: []const u8, options: GreOptions) !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [512]u8 = undefined;
+    var buf: [512]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.NEWLINK, socket.NLM_F.REQUEST | socket.NLM_F.CREATE | socket.NLM_F.EXCL | socket.NLM_F.ACK);
@@ -330,7 +330,7 @@ pub fn createGeneve(name: []const u8, options: GeneveOptions) !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [512]u8 = undefined;
+    var buf: [512]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.NEWLINK, socket.NLM_F.REQUEST | socket.NLM_F.CREATE | socket.NLM_F.EXCL | socket.NLM_F.ACK);
@@ -381,7 +381,7 @@ pub fn createIpip(name: []const u8, options: IpipOptions) !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [512]u8 = undefined;
+    var buf: [512]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.NEWLINK, socket.NLM_F.REQUEST | socket.NLM_F.CREATE | socket.NLM_F.EXCL | socket.NLM_F.ACK);
@@ -429,7 +429,7 @@ pub fn createSit(name: []const u8, options: IpipOptions) !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [512]u8 = undefined;
+    var buf: [512]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.NEWLINK, socket.NLM_F.REQUEST | socket.NLM_F.CREATE | socket.NLM_F.EXCL | socket.NLM_F.ACK);
@@ -477,7 +477,7 @@ pub fn createWireguard(name: []const u8) !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.NEWLINK, socket.NLM_F.REQUEST | socket.NLM_F.CREATE | socket.NLM_F.EXCL | socket.NLM_F.ACK);
@@ -509,7 +509,7 @@ pub fn deleteTunnel(name: []const u8) !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.DELLINK, socket.NLM_F.REQUEST | socket.NLM_F.ACK);

@@ -207,7 +207,7 @@ pub fn moveInterfaceToNamespace(if_index: i32, ns_name: []const u8) !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.SETLINK, socket.NLM_F.REQUEST | socket.NLM_F.ACK);
@@ -232,7 +232,7 @@ pub fn moveInterfaceToPid(if_index: i32, pid: i32) !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.SETLINK, socket.NLM_F.REQUEST | socket.NLM_F.ACK);

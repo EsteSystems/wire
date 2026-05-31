@@ -41,7 +41,7 @@ pub fn createVethPair(name: []const u8, peer_name: []const u8) !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [1024]u8 = undefined;
+    var buf: [1024]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     // Build RTM_NEWLINK message
@@ -97,7 +97,7 @@ pub fn deleteVeth(name: []const u8) !void {
     }
     const iface = maybe_iface.?;
 
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.DELLINK, socket.NLM_F.REQUEST | socket.NLM_F.ACK);
@@ -127,7 +127,7 @@ pub fn setVethNetns(name: []const u8, ns_fd: i32) !void {
     }
     const iface = maybe_iface.?;
 
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.SETLINK, socket.NLM_F.REQUEST | socket.NLM_F.ACK);
@@ -159,7 +159,7 @@ pub fn setVethNetnsbyPid(name: []const u8, pid: i32) !void {
     }
     const iface = maybe_iface.?;
 
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.SETLINK, socket.NLM_F.REQUEST | socket.NLM_F.ACK);

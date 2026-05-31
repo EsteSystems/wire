@@ -43,7 +43,7 @@ pub fn createVlan(parent_name: []const u8, vlan_id: u16) !void {
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var buf: [512]u8 = undefined;
+    var buf: [512]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     // Build RTM_NEWLINK message
@@ -92,7 +92,7 @@ pub fn createVlanWithName(parent_name: []const u8, vlan_id: u16, vlan_name: []co
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var buf: [512]u8 = undefined;
+    var buf: [512]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     // Build RTM_NEWLINK message
@@ -141,7 +141,7 @@ pub fn deleteVlan(name: []const u8) !void {
     }
     const iface = maybe_iface.?;
 
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.DELLINK, socket.NLM_F.REQUEST | socket.NLM_F.ACK);

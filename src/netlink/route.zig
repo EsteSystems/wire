@@ -100,7 +100,7 @@ pub fn getRoutes(allocator: std.mem.Allocator) ![]Route {
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.GETROUTE, socket.NLM_F.REQUEST | socket.NLM_F.DUMP);
@@ -200,7 +200,7 @@ pub fn addRoute(family: u8, dst: ?[]const u8, dst_len: u8, gateway: ?[]const u8,
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.NEWROUTE, socket.NLM_F.REQUEST | socket.NLM_F.ACK | socket.NLM_F.CREATE | socket.NLM_F.EXCL);
@@ -256,7 +256,7 @@ pub fn addEcmpRoute(family: u8, dst: ?[]const u8, dst_len: u8, nexthops: []const
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [1024]u8 = undefined;
+    var buf: [1024]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.NEWROUTE, socket.NLM_F.REQUEST | socket.NLM_F.ACK | socket.NLM_F.CREATE | socket.NLM_F.EXCL);
@@ -317,7 +317,7 @@ pub fn deleteRoute(family: u8, dst: ?[]const u8, dst_len: u8) !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.DELROUTE, socket.NLM_F.REQUEST | socket.NLM_F.ACK);

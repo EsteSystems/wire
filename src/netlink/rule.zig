@@ -144,7 +144,7 @@ pub fn getRules(allocator: std.mem.Allocator, family: u8) ![]Rule {
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.GETRULE, socket.NLM_F.REQUEST | socket.NLM_F.DUMP);
@@ -269,7 +269,7 @@ pub fn addRule(family: u8, priority: u32, table: u32, options: RuleOptions) !voi
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [512]u8 = undefined;
+    var buf: [512]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.NEWRULE, socket.NLM_F.REQUEST | socket.NLM_F.ACK | socket.NLM_F.CREATE | socket.NLM_F.EXCL);
@@ -333,7 +333,7 @@ pub fn deleteRule(family: u8, priority: u32) !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.DELRULE, socket.NLM_F.REQUEST | socket.NLM_F.ACK);

@@ -124,7 +124,7 @@ pub const NeighborEntry = struct {
 
     /// Format MAC address as string
     pub fn formatLladdr(self: *const Self) [17]u8 {
-        var buf: [17]u8 = undefined;
+        var buf: [17]u8 align(4) = undefined;
         if (self.has_lladdr) {
             _ = std.fmt.bufPrint(&buf, "{x:0>2}:{x:0>2}:{x:0>2}:{x:0>2}:{x:0>2}:{x:0>2}", .{
                 self.lladdr[0], self.lladdr[1], self.lladdr[2],
@@ -153,7 +153,7 @@ pub fn getNeighbors(allocator: std.mem.Allocator) ![]NeighborEntry {
     defer nl.close();
 
     // Build RTM_GETNEIGH request
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.GETNEIGH, socket.NLM_F.REQUEST | socket.NLM_F.DUMP);
@@ -384,7 +384,7 @@ pub fn addNeighbor(if_index: i32, ip: []const u8, mac: [6]u8, permanent: bool) !
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.NEWNEIGH, socket.NLM_F.REQUEST | socket.NLM_F.ACK | socket.NLM_F.CREATE | socket.NLM_F.REPLACE);
@@ -437,7 +437,7 @@ pub fn deleteNeighbor(if_index: i32, ip: []const u8) !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.DELNEIGH, socket.NLM_F.REQUEST | socket.NLM_F.ACK);
@@ -596,7 +596,7 @@ test "NeighborEntry formatAddress" {
     entry.address[2] = 0;
     entry.address[3] = 1;
 
-    var buf: [64]u8 = undefined;
+    var buf: [64]u8 align(4) = undefined;
     const str = try entry.formatAddress(&buf);
     try std.testing.expectEqualStrings("10.0.0.1", str);
 }

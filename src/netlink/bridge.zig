@@ -30,7 +30,7 @@ pub fn createBridge(name: []const u8) !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [512]u8 = undefined;
+    var buf: [512]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     // Build RTM_NEWLINK message
@@ -69,7 +69,7 @@ pub fn deleteBridge(name: []const u8) !void {
     }
     const iface = maybe_iface.?;
 
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.DELLINK, socket.NLM_F.REQUEST | socket.NLM_F.ACK);
@@ -106,7 +106,7 @@ pub fn addBridgeMember(bridge_name: []const u8, member_name: []const u8) !void {
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.SETLINK, socket.NLM_F.REQUEST | socket.NLM_F.ACK);
@@ -139,7 +139,7 @@ pub fn removeBridgeMember(member_name: []const u8) !void {
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.SETLINK, socket.NLM_F.REQUEST | socket.NLM_F.ACK);
@@ -171,7 +171,7 @@ pub fn setBridgeStp(name: []const u8, enabled: bool) !void {
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var buf: [512]u8 = undefined;
+    var buf: [512]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     // Use RTM_NEWLINK for modification (not SETLINK)
@@ -227,7 +227,7 @@ pub const FdbEntry = struct {
 
     /// Format MAC address as string
     pub fn formatMac(self: *const Self) [17]u8 {
-        var buf: [17]u8 = undefined;
+        var buf: [17]u8 align(4) = undefined;
         _ = std.fmt.bufPrint(&buf, "{x:0>2}:{x:0>2}:{x:0>2}:{x:0>2}:{x:0>2}:{x:0>2}", .{
             self.mac[0], self.mac[1], self.mac[2],
             self.mac[3], self.mac[4], self.mac[5],
@@ -284,7 +284,7 @@ pub fn getBridgeFdb(allocator: std.mem.Allocator, bridge_name: []const u8) ![]Fd
     defer nl.close();
 
     // Build RTM_GETNEIGH request with AF_BRIDGE family
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.GETNEIGH, socket.NLM_F.REQUEST | socket.NLM_F.DUMP);
@@ -374,7 +374,7 @@ pub fn getAllFdb(allocator: std.mem.Allocator) ![]FdbEntry {
     defer nl.close();
 
     // Build RTM_GETNEIGH request with AF_BRIDGE family
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.GETNEIGH, socket.NLM_F.REQUEST | socket.NLM_F.DUMP);
@@ -535,7 +535,7 @@ pub fn setBridgeVlanFiltering(name: []const u8, enabled: bool) !void {
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var buf: [512]u8 = undefined;
+    var buf: [512]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.NEWLINK, socket.NLM_F.REQUEST | socket.NLM_F.ACK);
@@ -572,7 +572,7 @@ pub fn addBridgeVlanEntry(port_name: []const u8, vid: u16, flags: u16) !void {
     defer nl.close();
 
     // RTM_SETLINK with AF_BRIDGE family and IFLA_AF_SPEC containing VLAN info
-    var buf: [512]u8 = undefined;
+    var buf: [512]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.SETLINK, socket.NLM_F.REQUEST | socket.NLM_F.ACK);
@@ -612,7 +612,7 @@ pub fn addFdbEntry(port_name: []const u8, mac: [6]u8, vlan_id: ?u16) !void {
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.NEWNEIGH, socket.NLM_F.REQUEST | socket.NLM_F.ACK | socket.NLM_F.CREATE | socket.NLM_F.REPLACE);
@@ -651,7 +651,7 @@ pub fn removeFdbEntry(port_name: []const u8, mac: [6]u8, vlan_id: ?u16) !void {
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.DELNEIGH, socket.NLM_F.REQUEST | socket.NLM_F.ACK);

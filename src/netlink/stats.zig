@@ -220,7 +220,7 @@ pub fn getAllInterfaceStats(allocator: std.mem.Allocator) ![]InterfaceWithStats 
     defer nl.close();
 
     // Build RTM_GETLINK request
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.GETLINK, socket.NLM_F.REQUEST | socket.NLM_F.DUMP);
@@ -406,7 +406,7 @@ test "InterfaceStats64 size" {
 }
 
 test "Stats formatBytes" {
-    var buf: [32]u8 = undefined;
+    var buf: [32]u8 align(4) = undefined;
 
     try std.testing.expectEqualStrings("0 B", Stats.formatBytes(0, &buf));
     try std.testing.expectEqualStrings("512 B", Stats.formatBytes(512, &buf));

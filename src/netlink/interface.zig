@@ -55,7 +55,7 @@ pub const Interface = struct {
     }
 
     pub fn formatMac(self: *const Interface) [17]u8 {
-        var buf: [17]u8 = undefined;
+        var buf: [17]u8 align(4) = undefined;
         _ = std.fmt.bufPrint(&buf, "{x:0>2}:{x:0>2}:{x:0>2}:{x:0>2}:{x:0>2}:{x:0>2}", .{
             self.mac[0], self.mac[1], self.mac[2],
             self.mac[3], self.mac[4], self.mac[5],
@@ -83,7 +83,7 @@ pub fn getInterfaces(allocator: std.mem.Allocator) ![]Interface {
     defer nl.close();
 
     // Build RTM_GETLINK request
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.GETLINK, socket.NLM_F.REQUEST | socket.NLM_F.DUMP);
@@ -271,7 +271,7 @@ pub fn setInterfaceState(name: []const u8, up: bool) !void {
     defer nl.close();
 
     // Build RTM_SETLINK request
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.SETLINK, socket.NLM_F.REQUEST | socket.NLM_F.ACK);
@@ -302,7 +302,7 @@ pub fn setInterfaceMtu(name: []const u8, mtu: u32) !void {
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.SETLINK, socket.NLM_F.REQUEST | socket.NLM_F.ACK);

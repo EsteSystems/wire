@@ -63,7 +63,7 @@ pub fn getAddresses(allocator: std.mem.Allocator) ![]Address {
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.GETADDR, socket.NLM_F.REQUEST | socket.NLM_F.DUMP);
@@ -166,7 +166,7 @@ pub fn addAddress(if_index: u32, family: u8, addr_bytes: []const u8, prefixlen: 
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.NEWADDR, socket.NLM_F.REQUEST | socket.NLM_F.ACK | socket.NLM_F.CREATE | socket.NLM_F.EXCL);
@@ -194,7 +194,7 @@ pub fn deleteAddress(if_index: u32, family: u8, addr_bytes: []const u8, prefixle
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.DELADDR, socket.NLM_F.REQUEST | socket.NLM_F.ACK);

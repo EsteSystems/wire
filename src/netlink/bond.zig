@@ -250,7 +250,7 @@ pub fn createBondWithOptions(name: []const u8, options: BondOptions) !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [512]u8 = undefined;
+    var buf: [512]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.NEWLINK, socket.NLM_F.REQUEST | socket.NLM_F.ACK | socket.NLM_F.CREATE | socket.NLM_F.EXCL);
@@ -291,7 +291,7 @@ pub fn modifyBond(name: []const u8, options: BondOptions) !void {
     defer nl.close();
 
     // RTM_NEWLINK without CREATE/EXCL flags modifies existing interface
-    var buf: [512]u8 = undefined;
+    var buf: [512]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.NEWLINK, socket.NLM_F.REQUEST | socket.NLM_F.ACK);
@@ -321,7 +321,7 @@ pub fn deleteBond(name: []const u8) !void {
     }
     const iface = maybe_iface.?;
 
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.DELLINK, socket.NLM_F.REQUEST | socket.NLM_F.ACK);
@@ -375,7 +375,7 @@ pub fn addBondMember(bond_name: []const u8, member_name: []const u8) !void {
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.SETLINK, socket.NLM_F.REQUEST | socket.NLM_F.ACK);
@@ -412,7 +412,7 @@ pub fn removeBondMember(member_name: []const u8) !void {
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.SETLINK, socket.NLM_F.REQUEST | socket.NLM_F.ACK);
@@ -547,7 +547,7 @@ pub fn getBondMemberCarrier(member_name: []const u8) !bool {
     const fd: i32 = @intCast(fd_result);
     defer _ = linux.close(fd);
 
-    var buf: [4]u8 = undefined;
+    var buf: [4]u8 align(4) = undefined;
     const read_result = linux.read(fd, &buf, buf.len);
     if (@as(isize, @bitCast(read_result)) < 0) {
         return error.SysfsReadFailed;

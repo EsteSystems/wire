@@ -162,7 +162,7 @@ pub fn getQdiscs(allocator: std.mem.Allocator, if_index: i32) ![]QdiscInfo {
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var buf: [128]u8 = undefined;
+    var buf: [128]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.GETQDISC, socket.NLM_F.REQUEST | socket.NLM_F.DUMP);
@@ -241,7 +241,7 @@ pub fn addPfifoQdisc(if_index: i32, handle: u32, parent: u32, limit: ?u32) !void
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.NEWQDISC, socket.NLM_F.REQUEST | socket.NLM_F.CREATE | socket.NLM_F.EXCL | socket.NLM_F.ACK);
@@ -276,7 +276,7 @@ pub fn addTbfQdisc(if_index: i32, handle: u32, parent: u32, rate_bps: u64, burst
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [512]u8 = undefined;
+    var buf: [512]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.NEWQDISC, socket.NLM_F.REQUEST | socket.NLM_F.CREATE | socket.NLM_F.EXCL | socket.NLM_F.ACK);
@@ -333,7 +333,7 @@ pub fn addFqCodelQdisc(if_index: i32, handle: u32, parent: u32) !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.NEWQDISC, socket.NLM_F.REQUEST | socket.NLM_F.CREATE | socket.NLM_F.EXCL | socket.NLM_F.ACK);
@@ -360,7 +360,7 @@ pub fn deleteQdisc(if_index: i32, handle: u32, parent: u32) !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [128]u8 = undefined;
+    var buf: [128]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.DELQDISC, socket.NLM_F.REQUEST | socket.NLM_F.ACK);
@@ -386,7 +386,7 @@ pub fn addHtbQdisc(if_index: i32, handle: u32, parent: u32, default_class: ?u32)
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [512]u8 = undefined;
+    var buf: [512]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.NEWQDISC, socket.NLM_F.REQUEST | socket.NLM_F.CREATE | socket.NLM_F.EXCL | socket.NLM_F.ACK);
@@ -461,7 +461,7 @@ pub fn getClasses(allocator: std.mem.Allocator, if_index: i32) ![]ClassInfo {
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var buf: [128]u8 = undefined;
+    var buf: [128]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.GETTCLASS, socket.NLM_F.REQUEST | socket.NLM_F.DUMP);
@@ -543,7 +543,7 @@ pub fn addHtbClass(if_index: i32, classid: u32, parent: u32, rate_bps: u64, ceil
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [1024]u8 = undefined;
+    var buf: [1024]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.NEWTCLASS, socket.NLM_F.REQUEST | socket.NLM_F.CREATE | socket.NLM_F.EXCL | socket.NLM_F.ACK);
@@ -609,7 +609,7 @@ pub fn deleteClass(if_index: i32, classid: u32) !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [128]u8 = undefined;
+    var buf: [128]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.DELTCLASS, socket.NLM_F.REQUEST | socket.NLM_F.ACK);
@@ -634,7 +634,7 @@ pub fn replaceQdisc(if_index: i32, kind: []const u8) !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [256]u8 = undefined;
+    var buf: [256]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     // NLM_F_CREATE | NLM_F_REPLACE allows replacement
@@ -742,7 +742,7 @@ pub fn getFilters(allocator: std.mem.Allocator, if_index: i32, parent: u32) ![]F
     var nl = try socket.NetlinkSocket.open();
     defer nl.close();
 
-    var buf: [128]u8 = undefined;
+    var buf: [128]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const hdr = try builder.addHeader(socket.RTM.GETTFILTER, socket.NLM_F.REQUEST | socket.NLM_F.DUMP);
@@ -824,7 +824,7 @@ pub fn addU32FilterDstIP(if_index: i32, parent: u32, prio: u16, dst_ip: [4]u8, d
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [512]u8 = undefined;
+    var buf: [512]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     // Filter info: priority in upper 16 bits, protocol in lower 16 bits
@@ -884,7 +884,7 @@ pub fn addFwFilter(if_index: i32, parent: u32, prio: u16, fwmark: u32, classid: 
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [512]u8 = undefined;
+    var buf: [512]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     // Filter info: priority in upper 16 bits, protocol in lower 16 bits
@@ -922,7 +922,7 @@ pub fn deleteFilter(if_index: i32, parent: u32, prio: u16, handle: u32, protocol
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var buf: [128]u8 = undefined;
+    var buf: [128]u8 align(4) = undefined;
     var builder = socket.MessageBuilder.init(&buf, nl.nextSeq(), nl.pid);
 
     const info: u32 = (@as(u32, prio) << 16) | @as(u32, std.mem.nativeToBig(u16, protocol));
